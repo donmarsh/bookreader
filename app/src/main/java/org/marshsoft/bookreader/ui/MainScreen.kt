@@ -11,6 +11,7 @@ import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.filled.Explore
 import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
+import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.DrawerValue
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
@@ -83,6 +84,17 @@ fun MainScreen() {
                     icon = { Icon(Icons.Default.PersonAdd, contentDescription = null) },
                     modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
                 )
+                NavigationDrawerItem(
+                    label = { Text("Settings") },
+                    selected = currentRoute == Screen.Settings.route,
+                    onClick = {
+                        scope.launch { drawerState.close() }
+                        navController.navigate(Screen.Settings.route)
+                    },
+                    icon = { Icon(Icons.Default.Settings, contentDescription = null) },
+                    modifier = Modifier.padding(NavigationDrawerItemDefaults.ItemPadding)
+                )
+                Spacer(modifier = Modifier.height(16.dp))
             }
         }
     ) {

@@ -2,6 +2,7 @@ plugins {
     alias(libs.plugins.android.application)
     alias(libs.plugins.kotlin.compose)
     alias(libs.plugins.ksp)
+    alias(libs.plugins.google.services)
 }
 
 android {
@@ -55,6 +56,30 @@ dependencies {
     implementation(libs.coil.compose)
     implementation(libs.coil.network)
     implementation(libs.androidx.compose.ui.text.google.fonts)
+    
+    // Firebase
+    implementation(platform(libs.firebase.bom))
+    implementation(libs.firebase.auth)
+    implementation(libs.firebase.firestore)
+    implementation(libs.firebase.storage)
+
+    // Credentials & Auth
+    implementation(libs.androidx.credentials)
+    implementation(libs.androidx.credentials.play.services.auth)
+    implementation(libs.play.services.auth)
+    implementation(libs.googleid)
+
+    // WorkManager
+    implementation(libs.androidx.work.runtime)
+
+    // Google Drive API
+    implementation(libs.google.drive) {
+        exclude(group = "org.apache.httpcomponents")
+    }
+    implementation(libs.google.api.client)
+    implementation(libs.google.http.gson)
+    implementation(libs.google.http.android)
+
     implementation(libs.readium.shared)
     implementation(libs.readium.streamer)
     implementation(libs.readium.navigator)

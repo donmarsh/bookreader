@@ -1,0 +1,29 @@
+{
+  "project_info": {
+    "project_number": "993966114933",
+    "project_id": "book-sanctuary-59f2a",
+    "storage_bucket": "book-sanctuary-59f2a.firebasestorage.app"
+  },
+  "client": [
+    {
+      "client_info": {
+        "mobilesdk_app_id": "1:993966114933:android:4d93755de707702360503c",
+        "android_client_info": {
+          "package_name": "org.marshsoft.bookreader"
+        }
+      },
+      "oauth_client": [],
+      "api_key": [
+        {
+          "current_key": "AIzaSyAtF4_80yp1Bdp92LuFHeTSseIcKwfeKJ8"
+        }
+      ],
+      "services": {
+        "appinvite_service": {
+          "other_platform_oauth_client": []
+        }
+      }
+    }
+  ],
+  "configuration_version": "1"
+}

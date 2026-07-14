@@ -8,6 +8,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
+import org.marshsoft.bookreader.data.repository.SyncRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.publication.Locator
@@ -23,7 +24,7 @@ data class ReaderUiState(
     val totalPages: Int? = null,
     val isLoading: Boolean = true,
     val error: String? = null,
-    val preferences: EpubPreferences = EpubPreferences(),
+    val preferences: EpubPreferences = EpubPreferences(publisherStyles = false),
     val isHudVisible: Boolean = true,
     val pendingLocator: Locator? = null
 )
@@ -31,7 +32,8 @@ data class ReaderUiState(
 class ReaderViewModel(
     private val bookId: String,
     private val bookDao: BookDao,
-    private val bookParser: BookParser
+    private val bookParser: BookParser,
+    private val syncRepository: SyncRepository
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(ReaderUiState())
@@ -52,7 +54,9 @@ class ReaderViewModel(
                 
                 val entity = bookDao.getBookById(idLong)
                 if (entity != null) {
-                    val book = entity.toDomain()
+                    syncRepository.syncProgress(entity)
+                    val updatedEntity = bookDao.getBookById(idLong) ?: entity
+                    val book = updatedEntity.toDomain()
                     val publication = bookParser.parsePublication(File(book.filePath))
                     val totalPages = publication?.findService(PositionsService::class)?.positions()?.size
                     
@@ -98,15 +102,15 @@ class ReaderViewModel(
                 val idLong = bookId.toLongOrNull() ?: return@launch
                 val entity = bookDao.getBookById(idLong)
                 if (entity != null) {
-                    bookDao.updateBook(entity.copy(
+                    val updatedBook = entity.copy(
                         progress = progress,
                         lastReadLocation = locationJson,
                         lastReadTimestamp = System.currentTimeMillis()
-                    ))
-                    _uiState.value = _uiState.value.copy(book = entity.toDomain().copy(
-                        progress = progress,
-                        lastReadLocation = locationJson
-                    ))
+                    )
+                    bookDao.updateBook(updatedBook)
+                    syncRepository.syncProgress(updatedBook)
+                    
+                    _uiState.value = _uiState.value.copy(book = updatedBook.toDomain())
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

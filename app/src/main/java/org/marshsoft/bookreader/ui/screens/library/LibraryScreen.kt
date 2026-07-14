@@ -47,7 +47,8 @@ fun LibraryScreen(
     val viewModel: LibraryViewModel = viewModel(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                return LibraryViewModel(app.database.bookDao(), app.bookParser) as T
+                @Suppress("UNCHECKED_CAST")
+                return LibraryViewModel(app.database.bookDao(), app.bookParser, app.syncRepository) as T
             }
         }
     )

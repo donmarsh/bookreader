@@ -13,6 +13,7 @@ import org.marshsoft.bookreader.ui.screens.library.LibraryScreen
 import org.marshsoft.bookreader.ui.screens.login.ForgotPasswordScreen
 import org.marshsoft.bookreader.ui.screens.login.LoginScreen
 import org.marshsoft.bookreader.ui.screens.reader.ReaderScreen
+import org.marshsoft.bookreader.ui.screens.settings.SettingsScreen
 import org.marshsoft.bookreader.ui.screens.signup.SignUpScreen
 
 @Composable
@@ -63,6 +64,12 @@ fun NavGraph(
             Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
                 Text("Profile Screen")
             }
+        }
+        composable(Screen.Settings.route) {
+            SettingsScreen(
+                onBackClick = { navController.popBackStack() },
+                onLoginClick = { navController.navigate(Screen.Login.route) }
+            )
         }
         composable(Screen.Reader.route) { backStackEntry ->
             val bookId = backStackEntry.arguments?.getString("bookId") ?: ""

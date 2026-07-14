@@ -19,6 +19,10 @@ import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextDecoration
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
+import androidx.lifecycle.ViewModel
+import androidx.lifecycle.ViewModelProvider
+import androidx.lifecycle.viewmodel.compose.viewModel
+import org.marshsoft.bookreader.BookReaderApplication
 import org.marshsoft.bookreader.ui.theme.ManropeFamily
 
 @Composable
@@ -28,6 +32,19 @@ fun LoginScreen(
     onForgotPasswordClick: () -> Unit,
     onGoogleSignInClick: () -> Unit
 ) {
+    val context = androidx.compose.ui.platform.LocalContext.current
+    val app = context.applicationContext as BookReaderApplication
+    val viewModel: LoginViewModel = viewModel(
+        factory = object : ViewModelProvider.Factory {
+            override fun <T : ViewModel> create(modelClass: Class<T>): T {
+                @Suppress("UNCHECKED_CAST")
+                return LoginViewModel(app.authRepository) as T
+            }
+        }
+    )
+
+    val isLoading by viewModel.isLoading.collectAsState()
+    val error by viewModel.error.collectAsState()
     var email by remember { mutableStateOf("") }
     var password by remember { mutableStateOf("") }
 
@@ -100,7 +117,8 @@ fun LoginScreen(
 
             // Google Sign In Button
             OutlinedButton(
-                onClick = onGoogleSignInClick,
+                onClick = { viewModel.signInWithGoogle(onGoogleSignInClick) },
+                enabled = !isLoading,
                 modifier = Modifier
                     .fillMaxWidth()
                     .height(56.dp),
@@ -132,10 +150,16 @@ fun LoginScreen(
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
-                        text = "Sign in with Google",
+                        text = if (isLoading) "Signing in..." else "Sign in with Google",
                         style = MaterialTheme.typography.labelLarge
                     )
                 }
+            }
+
+            val errorText = error
+            if (errorText != null) {
+                Spacer(modifier = Modifier.height(8.dp))
+                Text(text = errorText, color = MaterialTheme.colorScheme.error, style = MaterialTheme.typography.labelSmall)
             }
 
             Spacer(modifier = Modifier.height(32.dp))

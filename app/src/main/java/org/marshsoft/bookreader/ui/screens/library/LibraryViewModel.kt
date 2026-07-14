@@ -10,6 +10,7 @@ import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
+import org.marshsoft.bookreader.data.repository.SyncRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
 import java.io.File
@@ -20,7 +21,8 @@ data class LibraryUiState(
 
 class LibraryViewModel(
     private val bookDao: BookDao,
-    private val bookParser: BookParser
+    private val bookParser: BookParser,
+    private val syncRepository: SyncRepository
 ) : ViewModel() {
 
     private val _books = MutableStateFlow<List<Book>>(emptyList())
@@ -131,6 +133,7 @@ class LibraryViewModel(
                 identifier = identifier
             )
             bookDao.insertBook(entity)
+            syncRepository.uploadBook(entity)
         }
     }
 

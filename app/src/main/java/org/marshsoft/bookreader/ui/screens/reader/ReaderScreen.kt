@@ -47,11 +47,11 @@ import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
-import androidx.fragment.app.commit
+import androidx.fragment.app.commitNow
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
-import androidx.lifecycle.lifecycleScope
 import androidx.lifecycle.viewmodel.compose.viewModel
+import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.BookReaderApplication
@@ -82,7 +82,7 @@ fun ReaderScreen(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return ReaderViewModel(bookId, app.database.bookDao(), app.bookParser) as T
+                return ReaderViewModel(bookId, app.database.bookDao(), app.bookParser, app.syncRepository) as T
             }
         }
     )
@@ -269,6 +269,20 @@ fun ReadiumNavigator(
     }
     
     val containerId = remember { android.view.View.generateViewId() }
+    var navigator by remember { mutableStateOf<org.readium.r2.navigator.VisualNavigator?>(null) }
+
+    LaunchedEffect(navigator) {
+        val nav = navigator ?: return@LaunchedEffect
+        // Ensure fragment is attached before accessing its properties/viewModel
+        if (nav is androidx.fragment.app.Fragment) {
+            while (!nav.isAdded || nav.activity == null) {
+                delay(10)
+            }
+        }
+        nav.currentLocator.collectLatest { locator ->
+            onProgressChanged(locator)
+        }
+    }
 
     AndroidView(
         factory = { ctx ->
@@ -297,7 +311,10 @@ fun ReadiumNavigator(
                     val factory = EpubNavigatorFactory(
                         publication = publication,
                         configuration = EpubNavigatorFactory.Configuration(
-                            defaults = EpubDefaults(scroll = false)
+                            defaults = EpubDefaults(
+                                scroll = false,
+                                publisherStyles = false
+                            )
                         )
                     )
                     factory.createFragmentFactory(
@@ -314,19 +331,19 @@ fun ReadiumNavigator(
                     ).instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
                 }
 
-                val navigator = fragment as org.readium.r2.navigator.VisualNavigator
-                navigator.addInputListener(object : InputListener {
+                val nav = fragment as org.readium.r2.navigator.VisualNavigator
+                nav.addInputListener(object : InputListener {
                     override fun onTap(event: TapEvent): Boolean {
-                        val view = navigator.publicationView
+                        val view = nav.publicationView
                         val width = view.width
                         val x = event.point.x
 
-                        if (navigator is org.readium.r2.navigator.OverflowableNavigator) {
+                        if (nav is org.readium.r2.navigator.OverflowableNavigator) {
                             if (x < width * 0.2) {
-                                navigator.goBackward(animated = true)
+                                nav.goBackward(animated = true)
                                 return true
                             } else if (x > width * 0.8) {
-                                navigator.goForward(animated = true)
+                                nav.goForward(animated = true)
                                 return true
                             }
                         }
@@ -336,23 +353,21 @@ fun ReadiumNavigator(
                     }
                 })
 
-                fragmentManager.commit {
+                fragmentManager.commitNow {
                     replace(containerId, fragment)
                 }
-
-                activity.lifecycleScope.launch {
-                    navigator.currentLocator.collectLatest { locator ->
-                        onProgressChanged(locator)
-                    }
-                }
-            } else {
-                if (currentFragment is EpubNavigatorFragment) {
-                    currentFragment.submitPreferences(preferences)
-                }
                 
-                if (pendingLocator != null) {
-                    (currentFragment as? org.readium.r2.navigator.Navigator)?.go(pendingLocator)
-                    onLocatorConsumed()
+                navigator = nav
+            } else {
+                if (currentFragment.isAdded) {
+                    if (currentFragment is EpubNavigatorFragment) {
+                        currentFragment.submitPreferences(preferences)
+                    }
+                    
+                    if (pendingLocator != null) {
+                        (currentFragment as? org.readium.r2.navigator.Navigator)?.go(pendingLocator)
+                        onLocatorConsumed()
+                    }
                 }
             }
         }
