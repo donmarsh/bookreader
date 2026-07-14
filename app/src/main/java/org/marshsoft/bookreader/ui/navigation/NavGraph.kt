@@ -18,7 +18,8 @@ import org.marshsoft.bookreader.ui.screens.signup.SignUpScreen
 @Composable
 fun NavGraph(
     navController: NavHostController,
-    startDestination: String = Screen.Login.route,
+    onMenuClick: () -> Unit,
+    startDestination: String = Screen.Library.route,
     modifier: Modifier = Modifier
 ) {
     NavHost(
@@ -50,6 +51,7 @@ fun NavGraph(
         }
         composable(Screen.Library.route) {
             LibraryScreen(
+                onMenuClick = onMenuClick,
                 onBookClick = { bookId -> navController.navigate(Screen.Reader.createRoute(bookId)) }
             )
         }

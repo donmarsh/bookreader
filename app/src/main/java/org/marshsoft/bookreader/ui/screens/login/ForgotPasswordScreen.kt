@@ -137,7 +137,7 @@ fun ForgotPasswordScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text = "© 2024 THE SCHOLARLY SANCTUARY. ESTABLISHED FOR THE MIND.",
+                text = "© 2024 BOOK SANCTUARY. ESTABLISHED FOR THE MIND.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 textAlign = TextAlign.Center

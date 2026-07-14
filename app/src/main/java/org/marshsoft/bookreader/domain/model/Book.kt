@@ -8,5 +8,11 @@ data class Book(
     val coverUrl: String?,
     val filePath: String,
     val fileType: String,
-    val quote: String? = null
+    val quote: String? = null,
+    val description: String? = null,
+    val publisher: String? = null,
+    val publishedDate: String? = null,
+    val language: String? = null,
+    val identifier: String? = null,
+    val lastReadLocation: String? = null
 )

@@ -1,7 +1,7 @@
 package org.marshsoft.bookreader.ui.screens.library
 
-import android.content.Context
 import android.net.Uri
+import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -12,6 +12,11 @@ import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
+import java.io.File
+
+data class LibraryUiState(
+    val message: String? = null
+)
 
 class LibraryViewModel(
     private val bookDao: BookDao,
@@ -20,6 +25,9 @@ class LibraryViewModel(
 
     private val _books = MutableStateFlow<List<Book>>(emptyList())
     val books: StateFlow<List<Book>> = _books
+
+    private val _uiState = MutableStateFlow(LibraryUiState())
+    val uiState: StateFlow<LibraryUiState> = _uiState
 
     init {
         viewModelScope.launch {
@@ -31,34 +39,83 @@ class LibraryViewModel(
 
     fun importBook(uri: Uri) {
         viewModelScope.launch {
-            val fileType = if (uri.toString().endsWith(".epub", true)) "epub" else "pdf"
+            val originalFileName = bookParser.getFileName(uri) ?: "Unknown Book"
+            val fileType = if (originalFileName.endsWith(".epub", true) || 
+                            uri.toString().endsWith(".epub", true)) "epub" else "pdf"
+
             val fileName = "book_${System.currentTimeMillis()}.$fileType"
             val filePath = bookParser.saveFileToInternal(uri, fileName) ?: return@launch
             
-            var title = "Unknown Title"
+            var title = originalFileName.substringBeforeLast(".")
             var author = "Unknown Author"
             var coverPath: String? = null
+            var description: String? = null
+            var publisher: String? = null
+            var publishedDate: String? = null
+            var language: String? = null
+            var identifier: String? = null
 
-            if (fileType == "epub") {
-                val epubBook = bookParser.parseEpub(uri)
-                if (epubBook != null) {
-                    title = epubBook.title ?: title
-                    author = epubBook.metadata.authors.firstOrNull()?.toString() ?: author
-                    val coverBitmap = bookParser.getEpubCover(epubBook)
-                    if (coverBitmap != null) {
-                        coverPath = bookParser.saveBitmapToInternal(coverBitmap, "cover_${System.currentTimeMillis()}.png")
-                    }
+            val publication = bookParser.parsePublication(File(filePath))
+            if (publication != null) {
+                // Log all metadata for debugging
+                Log.d("MetadataLog", "--- Publication Metadata Start ---")
+                Log.d("MetadataLog", "Title: ${publication.metadata.title}")
+                Log.d("MetadataLog", "Identifier: ${publication.metadata.identifier}")
+                Log.d("MetadataLog", "Authors: ${publication.metadata.authors.map { it.localizedName.string }}")
+                
+                Log.d("MetadataLog", "--- Other Metadata (Extra) ---")
+                publication.metadata.otherMetadata.forEach { (key, value) ->
+                    Log.d("MetadataLog", "$key: $value")
                 }
-            } else {
-                val metadata = bookParser.getPdfMetadata(uri)
-                if (metadata != null) {
-                    title = metadata.first
-                    author = metadata.second
+                Log.d("MetadataLog", "--- Metadata End ---")
+
+                // Robust Dublin Core title extraction
+                val dcTitleRaw = publication.metadata.otherMetadata["http://purl.org/dc/elements/1.1/title"]
+                    ?: publication.metadata.otherMetadata["dc:title"]
+                
+                val dcTitle = when (dcTitleRaw) {
+                    is String -> dcTitleRaw
+                    is List<*> -> dcTitleRaw.firstOrNull()?.toString()
+                    else -> null
                 }
-                val coverBitmap = bookParser.getPdfCover(uri)
+                
+                title = dcTitle ?: publication.metadata.title ?: title
+
+                // Robust Dublin Core author extraction
+                val dcCreatorRaw = publication.metadata.otherMetadata["http://purl.org/dc/elements/1.1/creator"]
+                    ?: publication.metadata.otherMetadata["dc:creator"]
+
+                val dcAuthor = when (dcCreatorRaw) {
+                    is String -> dcCreatorRaw
+                    is List<*> -> dcCreatorRaw.firstOrNull()?.toString()
+                    else -> null
+                }
+
+                author = dcAuthor ?: publication.metadata.authors.firstOrNull()?.localizedName?.string ?: author
+                description = publication.metadata.description
+                publisher = publication.metadata.publishers.firstOrNull()?.localizedName?.string
+                publishedDate = publication.metadata.published?.toString()
+                language = publication.metadata.languages.firstOrNull()
+                identifier = publication.metadata.identifier
+
+                val coverBitmap = bookParser.getCover(publication)
                 if (coverBitmap != null) {
                     coverPath = bookParser.saveBitmapToInternal(coverBitmap, "cover_${System.currentTimeMillis()}.png")
                 }
+            }
+
+            // Duplicate check
+            val isDuplicate = if (identifier != null) {
+                bookDao.getBookByIdentifier(identifier) != null
+            } else {
+                bookDao.getBookByTitleAndAuthor(title, author) != null
+            }
+
+            if (isDuplicate) {
+                _uiState.value = _uiState.value.copy(message = "This book is already in your library")
+                File(filePath).delete()
+                coverPath?.let { File(it).delete() }
+                return@launch
             }
 
             val entity = BookEntity(
@@ -66,9 +123,35 @@ class LibraryViewModel(
                 author = author,
                 filePath = filePath,
                 fileType = fileType,
-                coverPath = coverPath
+                coverPath = coverPath,
+                description = description,
+                publisher = publisher,
+                publishedDate = publishedDate,
+                language = language,
+                identifier = identifier
             )
             bookDao.insertBook(entity)
+        }
+    }
+
+    fun clearMessage() {
+        _uiState.value = _uiState.value.copy(message = null)
+    }
+
+    fun deleteBook(book: Book) {
+        viewModelScope.launch {
+            try {
+                // Delete from database only, preserving the actual files
+                val idLong = book.id.toLongOrNull()
+                if (idLong != null) {
+                    val entity = bookDao.getBookById(idLong)
+                    if (entity != null) {
+                        bookDao.deleteBook(entity)
+                    }
+                }
+            } catch (e: Exception) {
+                e.printStackTrace()
+            }
         }
     }
 
@@ -79,6 +162,11 @@ class LibraryViewModel(
         progress = progress,
         coverUrl = coverPath,
         filePath = filePath,
-        fileType = fileType
+        fileType = fileType,
+        description = description,
+        publisher = publisher,
+        publishedDate = publishedDate,
+        language = language,
+        identifier = identifier
     )
 }

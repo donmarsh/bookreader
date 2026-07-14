@@ -13,5 +13,11 @@ data class BookEntity(
     val fileType: String, // "epub" or "pdf"
     val coverPath: String? = null,
     val progress: Float = 0f,
-    val lastReadTimestamp: Long = System.currentTimeMillis()
+    val lastReadTimestamp: Long = System.currentTimeMillis(),
+    val description: String? = null,
+    val publisher: String? = null,
+    val publishedDate: String? = null,
+    val language: String? = null,
+    val identifier: String? = null,
+    val lastReadLocation: String? = null
 )

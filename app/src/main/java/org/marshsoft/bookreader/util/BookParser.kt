@@ -2,44 +2,46 @@ package org.marshsoft.bookreader.util
 
 import android.content.Context
 import android.graphics.Bitmap
-import android.graphics.pdf.PdfRenderer
 import android.net.Uri
-import android.os.ParcelFileDescriptor
-import nl.siegmann.epublib.epub.EpubReader
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.withContext
+import org.readium.adapter.pdfium.document.PdfiumDocumentFactory
+import org.readium.r2.shared.publication.Publication
+import org.readium.r2.shared.publication.services.CoverService
+import org.readium.r2.shared.util.asset.AssetRetriever
+import org.readium.r2.shared.util.http.DefaultHttpClient
+import org.readium.r2.streamer.PublicationOpener
+import org.readium.r2.streamer.parser.DefaultPublicationParser
 import java.io.File
 import java.io.FileOutputStream
-import java.io.InputStream
-import nl.siegmann.epublib.domain.Book as EpubBook
 
 class BookParser(private val context: Context) {
+    private val httpClient = DefaultHttpClient()
+    private val assetRetriever = AssetRetriever(context.contentResolver, httpClient)
+    private val pdfFactory = PdfiumDocumentFactory(context)
+    private val publicationParser = DefaultPublicationParser(context, httpClient, assetRetriever, pdfFactory = pdfFactory)
+    private val publicationOpener = PublicationOpener(publicationParser)
 
-    fun parseEpub(uri: Uri): EpubBook? {
-        return try {
-            val inputStream: InputStream? = context.contentResolver.openInputStream(uri)
-            EpubReader().readEpub(inputStream)
+    suspend fun parsePublication(file: File): Publication? = withContext(Dispatchers.IO) {
+        try {
+            val asset = assetRetriever.retrieve(file).getOrNull() ?: return@withContext null
+            publicationOpener.open(asset, allowUserInteraction = false).getOrNull()
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
 
-    fun getEpubCover(epubBook: EpubBook): Bitmap? {
-        return try {
-            val coverImage = epubBook.coverImage ?: return null
-            val inputStream = coverImage.inputStream
-            android.graphics.BitmapFactory.decodeStream(inputStream)
+    suspend fun getCover(publication: Publication): Bitmap? = withContext(Dispatchers.IO) {
+        try {
+            publication.findService(CoverService::class)?.cover()
         } catch (e: Exception) {
             e.printStackTrace()
             null
         }
     }
 
-    fun getPdfMetadata(uri: Uri): Pair<String, String>? {
-        val fileName = getFileName(uri) ?: "Unknown"
-        return Pair(fileName, "Unknown Author")
-    }
-
-    private fun getFileName(uri: Uri): String? {
+    fun getFileName(uri: Uri): String? {
         var name: String? = null
         val cursor = context.contentResolver.query(uri, null, null, null, null)
         cursor?.use {
@@ -51,28 +53,6 @@ class BookParser(private val context: Context) {
             }
         }
         return name
-    }
-
-    fun getPdfCover(uri: Uri): Bitmap? {
-        return try {
-            val fileDescriptor: ParcelFileDescriptor? = context.contentResolver.openFileDescriptor(uri, "r")
-            if (fileDescriptor != null) {
-                val renderer = PdfRenderer(fileDescriptor)
-                if (renderer.pageCount > 0) {
-                    val page = renderer.openPage(0)
-                    val bitmap = Bitmap.createBitmap(page.width, page.height, Bitmap.Config.ARGB_8888)
-                    page.render(bitmap, null, null, PdfRenderer.Page.RENDER_MODE_FOR_DISPLAY)
-                    page.close()
-                    renderer.close()
-                    return bitmap
-                }
-                renderer.close()
-            }
-            null
-        } catch (e: Exception) {
-            e.printStackTrace()
-            null
-        }
     }
 
     fun saveFileToInternal(uri: Uri, fileName: String): String? {

@@ -59,7 +59,7 @@ fun SignUpScreen(
                     )
                     Spacer(modifier = Modifier.width(8.dp))
                     Text(
-                        text = "The Scholarly Sanctuary",
+                        text = "The Book Reader",
                         style = MaterialTheme.typography.titleMedium.copy(
                             fontWeight = FontWeight.Bold,
                             color = MaterialTheme.colorScheme.primary

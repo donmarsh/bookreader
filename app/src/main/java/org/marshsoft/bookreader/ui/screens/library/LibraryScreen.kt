@@ -3,6 +3,7 @@ package org.marshsoft.bookreader.ui.screens.library
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
@@ -10,12 +11,15 @@ import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.remember
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,6 +39,7 @@ import org.marshsoft.bookreader.domain.model.Book
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
+    onMenuClick: () -> Unit,
     onBookClick: (String) -> Unit
 ) {
     val context = LocalContext.current
@@ -48,7 +53,17 @@ fun LibraryScreen(
     )
 
     val books by viewModel.books.collectAsState()
+    val uiState by viewModel.uiState.collectAsState()
     val currentReading = books.firstOrNull()
+
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.message) {
+        uiState.message?.let {
+            snackbarHostState.showSnackbar(it)
+            viewModel.clearMessage()
+        }
+    }
 
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
@@ -57,6 +72,7 @@ fun LibraryScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
             FloatingActionButton(
                 onClick = { launcher.launch(arrayOf("application/epub+zip", "application/pdf")) },
@@ -70,12 +86,12 @@ fun LibraryScreen(
             TopAppBar(
                 title = {
                     Text(
-                        "The Scholarly Sanctuary",
+                        "The Book Sanctuary",
                         style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
                     )
                 },
                 navigationIcon = {
-                    IconButton(onClick = { /* TODO */ }) {
+                    IconButton(onClick = onMenuClick) {
                         Icon(Icons.Default.Menu, contentDescription = "Menu")
                     }
                 },
@@ -104,6 +120,22 @@ fun LibraryScreen(
                         color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
                     )
                     Spacer(modifier = Modifier.height(16.dp))
+
+                    // Cover Image at the top - Show full image
+                    AsyncImage(
+                        model = currentReading.coverUrl,
+                        contentDescription = null,
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .height(400.dp)
+                            .clip(RoundedCornerShape(12.dp))
+                            .background(MaterialTheme.colorScheme.surfaceVariant)
+                            .clickable { onBookClick(currentReading.id) },
+                        contentScale = ContentScale.Fit
+                    )
+
+                    Spacer(modifier = Modifier.height(24.dp))
+
                     Text(
                         text = currentReading.title,
                         style = MaterialTheme.typography.displayMedium.copy(
@@ -111,7 +143,24 @@ fun LibraryScreen(
                             color = MaterialTheme.colorScheme.primary
                         )
                     )
+                    Spacer(modifier = Modifier.height(8.dp))
+                    Text(
+                        text = "BY ${currentReading.author.uppercase()}",
+                        style = MaterialTheme.typography.labelMedium,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
                     Spacer(modifier = Modifier.height(12.dp))
+                    currentReading.description?.let {
+                        Text(
+                            text = it,
+                            style = MaterialTheme.typography.bodyMedium.copy(
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
+                            ),
+                            maxLines = 3,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                        )
+                        Spacer(modifier = Modifier.height(24.dp))
+                    }
                     currentReading.quote?.let {
                         Text(
                             text = it,
@@ -146,29 +195,30 @@ fun LibraryScreen(
 
                     Spacer(modifier = Modifier.height(24.dp))
 
-                    Button(
-                        onClick = { onBookClick(currentReading.id) },
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(56.dp),
-                        shape = RoundedCornerShape(8.dp)
+                    Row(
+                        modifier = Modifier.fillMaxWidth(),
+                        horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
-                        Text("CONTINUE READING", style = MaterialTheme.typography.labelLarge)
+                        Button(
+                            onClick = { onBookClick(currentReading.id) },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(56.dp),
+                            shape = RoundedCornerShape(8.dp)
+                        ) {
+                            Text("CONTINUE READING", style = MaterialTheme.typography.labelLarge)
+                        }
+
+                        OutlinedButton(
+                            onClick = { viewModel.deleteBook(currentReading) },
+                            modifier = Modifier
+                                .height(56.dp),
+                            shape = RoundedCornerShape(8.dp),
+                            colors = ButtonDefaults.outlinedButtonColors(contentColor = MaterialTheme.colorScheme.error)
+                        ) {
+                            Icon(Icons.Default.Delete, contentDescription = "Delete Book")
+                        }
                     }
-
-                    Spacer(modifier = Modifier.height(32.dp))
-
-                    // Cover Image
-                    AsyncImage(
-                        model = currentReading.coverUrl,
-                        contentDescription = null,
-                        modifier = Modifier
-                            .fillMaxWidth()
-                            .height(300.dp)
-                            .clip(RoundedCornerShape(12.dp))
-                            .background(MaterialTheme.colorScheme.surfaceVariant),
-                        contentScale = ContentScale.Crop
-                    )
                 } else {
                     Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
                         Text("No books imported yet. Click + to add one.", style = MaterialTheme.typography.bodyLarge)
@@ -196,13 +246,15 @@ fun LibraryScreen(
             }
 
             items(books.drop(1)) { book ->
-                BookItem(book = book, onClick = { onBookClick(book.id) })
+                BookItem(
+                    book = book,
+                    onClick = { onBookClick(book.id) },
+                    onDeleteClick = { viewModel.deleteBook(book) }
+                )
                 Spacer(modifier = Modifier.height(16.dp))
             }
 
             item {
-                Spacer(modifier = Modifier.height(24.dp))
-                CuratedPick()
                 Spacer(modifier = Modifier.height(80.dp))
             }
         }
@@ -210,7 +262,7 @@ fun LibraryScreen(
 }
 
 @Composable
-fun BookItem(book: Book, onClick: () -> Unit) {
+fun BookItem(book: Book, onClick: () -> Unit, onDeleteClick: () -> Unit) {
     Surface(
         onClick = onClick,
         color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
@@ -251,52 +303,12 @@ fun BookItem(book: Book, onClick: () -> Unit) {
                     Text("${(book.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp))
                 }
             }
-        }
-    }
-}
-
-@Composable
-fun CuratedPick() {
-    Box(
-        modifier = Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(12.dp))
-            .background(Color(0xFF463B20)) // Tertiary color or dark brown
-            .padding(24.dp)
-    ) {
-        Column {
-            AsyncImage(
-                model = "https://example.com/iliad.jpg",
-                contentDescription = null,
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .height(200.dp)
-                    .clip(RoundedCornerShape(8.dp)),
-                contentScale = ContentScale.Crop
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Text(
-                "CURATED PICK",
-                style = MaterialTheme.typography.labelSmall,
-                color = Color.White.copy(alpha = 0.6f)
-            )
-            Spacer(modifier = Modifier.height(8.dp))
-            Text(
-                "The Iliad",
-                style = MaterialTheme.typography.headlineMedium.copy(color = Color.White, fontWeight = FontWeight.Bold)
-            )
-            Spacer(modifier = Modifier.height(12.dp))
-            Text(
-                "\"Sing, Goddess, Achilles' rage, black and murderous, that cost the Greeks incalculable pain.\"",
-                style = MaterialTheme.typography.bodyMedium.copy(color = Color.White.copy(alpha = 0.8f))
-            )
-            Spacer(modifier = Modifier.height(24.dp))
-            Button(
-                onClick = { /* TODO */ },
-                colors = ButtonDefaults.buttonColors(containerColor = Color(0xFF2D2514)),
-                shape = RoundedCornerShape(8.dp)
-            ) {
-                Text("ADD TO LIBRARY", color = Color.White)
+            IconButton(onClick = onDeleteClick) {
+                Icon(
+                    Icons.Default.Delete,
+                    contentDescription = "Delete",
+                    tint = MaterialTheme.colorScheme.error.copy(alpha = 0.6f)
+                )
             }
         }
     }

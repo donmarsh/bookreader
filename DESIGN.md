@@ -1,4 +1,4 @@
-# Design System: The Scholarly Sanctuary
+# Design System: The Book Sanctuary
 
 ## 1. Overview & Creative North Star
 **Creative North Star: "The Digital Curator"**

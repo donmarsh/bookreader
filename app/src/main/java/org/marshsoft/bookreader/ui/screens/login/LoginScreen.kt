@@ -66,7 +66,7 @@ fun LoginScreen(
                 }
                 Spacer(modifier = Modifier.width(12.dp))
                 Text(
-                    text = "The Scholarly Sanctuary",
+                    text = "The Book Sanctuary",
                     style = MaterialTheme.typography.headlineMedium.copy(
                         fontWeight = FontWeight.Bold,
                         color = MaterialTheme.colorScheme.primary
@@ -264,7 +264,7 @@ fun LoginScreen(
             Spacer(modifier = Modifier.height(24.dp))
             
             Text(
-                text = "© 2024 THE SCHOLARLY SANCTUARY. ESTABLISHED FOR THE MIND.",
+                text = "© 2024 THE BOOK SANCTUARY. ESTABLISHED FOR THE MIND.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 textAlign = TextAlign.Center
