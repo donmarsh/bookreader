@@ -69,7 +69,7 @@ fun LibraryScreen(
     val launcher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.OpenDocument()
     ) { uri ->
-        uri?.let { viewModel.importBook(it) }
+        uri?.let { viewModel.importBook(context, it) }
     }
 
     Scaffold(

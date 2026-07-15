@@ -59,18 +59,18 @@ class SyncRepository(
         }
     }
 
-    suspend fun uploadBook(book: BookEntity) {
+    suspend fun uploadBook(book: BookEntity, activityContext: Context? = null) {
         if (!syncPreferences.isDriveSyncEnabled) return
         authRepository.currentUser.value ?: return
         val identifier = book.identifier ?: "${book.title}_${book.author}".hashCode().toString()
         val file = java.io.File(book.filePath)
         if (!file.exists()) return
 
-        val accessToken = authRepository.getAccessToken() ?: return
+        val accessToken = authRepository.getAccessToken(activityContext ?: context) ?: return
         googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType)
     }
 
-    suspend fun syncAll() {
+    suspend fun syncAll(activityContext: Context? = null) {
         if (!syncPreferences.isSyncEnabled) return
         try {
             val books = bookDao.getAllBooks().first()
@@ -80,7 +80,7 @@ class SyncRepository(
                 // If book file is missing and Drive sync is enabled, try to restore
                 val file = java.io.File(book.filePath)
                 if (!file.exists() && syncPreferences.isDriveSyncEnabled) {
-                    val accessToken = authRepository.getAccessToken()
+                    val accessToken = authRepository.getAccessToken(activityContext ?: context)
                     if (accessToken != null) {
                         val identifier = book.identifier ?: "${book.title}_${book.author}".hashCode().toString()
                         googleDriveRepository.downloadFile(accessToken, identifier, file)

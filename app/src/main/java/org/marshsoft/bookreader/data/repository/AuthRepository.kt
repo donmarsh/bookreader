@@ -3,6 +3,7 @@ package org.marshsoft.bookreader.data.repository
 import android.content.Context
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
@@ -19,10 +20,9 @@ import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.tasks.await
 import org.marshsoft.bookreader.domain.model.User
 
-class AuthRepository(private val context: Context) {
+class AuthRepository(private val appContext: Context) {
     private val auth: FirebaseAuth = Firebase.auth
-    private val credentialManager = CredentialManager.create(context)
-    private val authorizationClient = Identity.getAuthorizationClient(context)
+    private val credentialManager = CredentialManager.create(appContext)
 
     private val _currentUser = MutableStateFlow(auth.currentUser?.toDomain())
     val currentUser: StateFlow<User?> = _currentUser
@@ -38,9 +38,7 @@ class AuthRepository(private val context: Context) {
     }
 
     private fun checkDriveAuthorization() {
-        val driveScope = Scope(Scopes.DRIVE_FILE)
-        // Note: hasCapabilities might not be available on all Play Services versions
-        // We'll also try to just authorize and see if it has resolution
+        // ...
     }
 
     fun getDriveAuthorizationRequest(): AuthorizationRequest {
@@ -49,8 +47,9 @@ class AuthRepository(private val context: Context) {
             .build()
     }
 
-    suspend fun getAccessToken(): String? {
+    suspend fun getAccessToken(activity: Context): String? {
         return try {
+            val authorizationClient = Identity.getAuthorizationClient(activity)
             val request = getDriveAuthorizationRequest()
             val result = authorizationClient.authorize(request).await()
             result.accessToken
@@ -60,7 +59,7 @@ class AuthRepository(private val context: Context) {
         }
     }
 
-    suspend fun signInWithGoogle(): Result<User> {
+    suspend fun signInWithGoogle(activity: Context): Result<User> {
         return try {
             val webClientId = "993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com"
             
@@ -73,16 +72,24 @@ class AuthRepository(private val context: Context) {
                 .addCredentialOption(googleIdOption)
                 .build()
 
-            val result = credentialManager.getCredential(context, request)
+            val result = credentialManager.getCredential(activity, request)
             val credential = result.credential
 
-            if (credential is GoogleIdTokenCredential) {
-                val firebaseCredential = GoogleAuthProvider.getCredential(credential.idToken, null)
+            val googleIdTokenCredential = when {
+                credential is GoogleIdTokenCredential -> credential
+                credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL -> {
+                    GoogleIdTokenCredential.createFrom(credential.data)
+                }
+                else -> null
+            }
+
+            if (googleIdTokenCredential != null) {
+                val firebaseCredential = GoogleAuthProvider.getCredential(googleIdTokenCredential.idToken, null)
                 val authResult = auth.signInWithCredential(firebaseCredential).await()
                 val user = authResult.user?.toDomain() ?: throw Exception("Sign in failed")
                 Result.success(user)
             } else {
-                Result.failure(Exception("Unsupported credential type"))
+                Result.failure(Exception("Unsupported credential type: ${credential::class.java.name}"))
             }
         } catch (e: Exception) {
             Result.failure(e)

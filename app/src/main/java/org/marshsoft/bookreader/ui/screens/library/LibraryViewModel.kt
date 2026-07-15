@@ -39,7 +39,7 @@ class LibraryViewModel(
         }
     }
 
-    fun importBook(uri: Uri) {
+    fun importBook(context: android.content.Context, uri: Uri) {
         viewModelScope.launch {
             val originalFileName = bookParser.getFileName(uri) ?: "Unknown Book"
             val fileType = if (originalFileName.endsWith(".epub", true) || 
@@ -133,7 +133,7 @@ class LibraryViewModel(
                 identifier = identifier
             )
             bookDao.insertBook(entity)
-            syncRepository.uploadBook(entity)
+            syncRepository.uploadBook(entity, context)
         }
     }
 

@@ -30,9 +30,6 @@ fun NavGraph(
     ) {
         composable(Screen.Login.route) {
             LoginScreen(
-                onLoginClick = { navController.navigate(Screen.Library.route) },
-                onSignUpClick = { navController.navigate(Screen.SignUp.route) },
-                onForgotPasswordClick = { navController.navigate(Screen.ForgotPassword.route) },
                 onGoogleSignInClick = { navController.navigate(Screen.Library.route) }
             )
         }

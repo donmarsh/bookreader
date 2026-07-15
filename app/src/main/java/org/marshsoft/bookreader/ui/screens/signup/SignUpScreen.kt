@@ -103,14 +103,14 @@ fun SignUpScreen(
                     .height(56.dp),
                 shape = RoundedCornerShape(8.dp),
                 colors = ButtonDefaults.outlinedButtonColors(
-                    containerColor = Color.White,
+                    containerColor = MaterialTheme.colorScheme.surface,
                     contentColor = MaterialTheme.colorScheme.onSurface
                 ),
                 border = ButtonDefaults.outlinedButtonBorder.copy(
                     brush = Brush.linearGradient(
                         colors = listOf(
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f),
-                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.2f)
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f),
+                            MaterialTheme.colorScheme.outlineVariant.copy(alpha = 0.4f)
                         )
                     )
                 )
@@ -123,9 +123,18 @@ fun SignUpScreen(
                     Box(
                         modifier = Modifier
                             .size(20.dp)
-                            .background(Color.White)
+                            .background(
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.1f),
+                                shape = RoundedCornerShape(4.dp)
+                            ),
+                        contentAlignment = Alignment.Center
                     ) {
-                        Text("G", fontWeight = FontWeight.Bold, color = Color.Gray)
+                        Text(
+                            text = "G",
+                            fontWeight = FontWeight.Bold,
+                            color = MaterialTheme.colorScheme.primary,
+                            fontSize = 12.sp
+                        )
                     }
                     Spacer(modifier = Modifier.width(12.dp))
                     Text(
@@ -164,9 +173,9 @@ fun SignUpScreen(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("Alexander Curator") },
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        disabledContainerColor = Color.White,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedIndicatorColor = MaterialTheme.colorScheme.primary,
                         unfocusedIndicatorColor = Color.Transparent,
                     ),
@@ -190,9 +199,9 @@ fun SignUpScreen(
                     modifier = Modifier.fillMaxWidth(),
                     placeholder = { Text("alexander@library.org") },
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        disabledContainerColor = Color.White,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedIndicatorColor = MaterialTheme.colorScheme.primary,
                         unfocusedIndicatorColor = Color.Transparent,
                     ),
@@ -217,9 +226,9 @@ fun SignUpScreen(
                     visualTransformation = PasswordVisualTransformation(),
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Password),
                     colors = TextFieldDefaults.colors(
-                        focusedContainerColor = Color.White,
-                        unfocusedContainerColor = Color.White,
-                        disabledContainerColor = Color.White,
+                        focusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        unfocusedContainerColor = MaterialTheme.colorScheme.surfaceVariant,
+                        disabledContainerColor = MaterialTheme.colorScheme.surfaceVariant,
                         focusedIndicatorColor = MaterialTheme.colorScheme.primary,
                         unfocusedIndicatorColor = Color.Transparent,
                     ),

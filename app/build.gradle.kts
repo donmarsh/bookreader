@@ -38,6 +38,22 @@ android {
     buildFeatures {
         compose = true
     }
+    packaging {
+        resources {
+            excludes += "/META-INF/INDEX.LIST"
+            excludes += "/META-INF/DEPENDENCIES"
+        }
+    }
+}
+
+configurations.all {
+    resolutionStrategy {
+        force(libs.grpc.api)
+        force(libs.grpc.core)
+        force(libs.grpc.okhttp)
+        force(libs.grpc.stub)
+        force(libs.grpc.protobuf.lite)
+    }
 }
 
 dependencies {

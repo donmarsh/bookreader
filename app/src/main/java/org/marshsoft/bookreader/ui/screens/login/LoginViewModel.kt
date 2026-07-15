@@ -12,17 +12,19 @@ class LoginViewModel(
     private val authRepository: AuthRepository
 ) : ViewModel() {
 
+    val currentUser = authRepository.currentUser
+
     private val _isLoading = MutableStateFlow(false)
     val isLoading: StateFlow<Boolean> = _isLoading.asStateFlow()
 
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    fun signInWithGoogle(onSuccess: () -> Unit) {
+    fun signInWithGoogle(context: android.content.Context, onSuccess: () -> Unit) {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
-            val result = authRepository.signInWithGoogle()
+            val result = authRepository.signInWithGoogle(context)
             _isLoading.value = false
             
             result.onSuccess {
@@ -30,6 +32,12 @@ class LoginViewModel(
             }.onFailure { e ->
                 _error.value = e.message ?: "Sign in failed"
             }
+        }
+    }
+
+    fun signOut() {
+        viewModelScope.launch {
+            authRepository.signOut()
         }
     }
 }

@@ -30,6 +30,7 @@ googleServices = "4.5.0"
 googleDrive = "v3-rev20241027-2.0.0"
 googleApiClient = "2.9.0"
 googleHttpClient = "2.1.1"
+grpc = "1.62.2"
 
 [libraries]
 androidx-core-ktx = { group = "androidx.core", name = "core-ktx", version.ref = "coreKtx" }
@@ -57,7 +58,6 @@ hilt-android = { group = "com.google.dagger", name = "hilt-android", version.ref
 hilt-compiler = { group = "com.google.dagger", name = "hilt-android-compiler", version.ref = "hilt" }
 androidx-hilt-navigation-compose = { group = "androidx.hilt", name = "hilt-navigation-compose", version.ref = "hiltNavigationCompose" }
 androidx-compose-ui-text-google-fonts = { group = "androidx.compose.ui", name = "ui-text-google-fonts", version.ref = "googleFonts" }
-epublib = { group = "nl.siegmann.epublib", name = "epublib-core", version.ref = "epublib" }
 mockk = { group = "io.mockk", name = "mockk", version.ref = "mockk" }
 mockk-android = { group = "io.mockk", name = "mockk-android", version.ref = "mockk" }
 turbine = { group = "app.cash.turbine", name = "turbine", version.ref = "turbine" }
@@ -91,6 +91,12 @@ google-drive = { group = "com.google.apis", name = "google-api-services-drive", 
 google-api-client = { group = "com.google.api-client", name = "google-api-client-android", version.ref = "googleApiClient" }
 google-http-gson = { group = "com.google.http-client", name = "google-http-client-gson", version.ref = "googleHttpClient" }
 google-http-android = { group = "com.google.http-client", name = "google-http-client-android", version.ref = "googleHttpClient" }
+
+grpc-api = { group = "io.grpc", name = "grpc-api", version.ref = "grpc" }
+grpc-core = { group = "io.grpc", name = "grpc-core", version.ref = "grpc" }
+grpc-okhttp = { group = "io.grpc", name = "grpc-okhttp", version.ref = "grpc" }
+grpc-stub = { group = "io.grpc", name = "grpc-stub", version.ref = "grpc" }
+grpc-protobuf-lite = { group = "io.grpc", name = "grpc-protobuf-lite", version.ref = "grpc" }
 
 [plugins]
 android-application = { id = "com.android.application", version.ref = "agp" }

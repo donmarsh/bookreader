@@ -38,6 +38,8 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
+import androidx.compose.runtime.saveable.rememberSaveable
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -53,7 +55,6 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.flow.collectLatest
-import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.BookReaderApplication
 import org.readium.adapter.pdfium.navigator.PdfiumEngineProvider
 import org.readium.r2.navigator.epub.EpubDefaults
@@ -268,8 +269,33 @@ fun ReadiumNavigator(
         c as FragmentActivity
     }
     
-    val containerId = remember { android.view.View.generateViewId() }
+    val containerId = rememberSaveable { android.view.View.generateViewId() }
     var navigator by remember { mutableStateOf<org.readium.r2.navigator.VisualNavigator?>(null) }
+
+    val addInputListeners = remember(onToggleHud) {
+        { nav: org.readium.r2.navigator.VisualNavigator ->
+            nav.addInputListener(object : InputListener {
+                override fun onTap(event: TapEvent): Boolean {
+                    val view = nav.publicationView
+                    val width = view.width
+                    val x = event.point.x
+
+                    if (nav is org.readium.r2.navigator.OverflowableNavigator) {
+                        if (x < width * 0.2) {
+                            nav.goBackward(animated = true)
+                            return true
+                        } else if (x > width * 0.8) {
+                            nav.goForward(animated = true)
+                            return true
+                        }
+                    }
+
+                    onToggleHud()
+                    return true
+                }
+            })
+        }
+    }
 
     LaunchedEffect(navigator) {
         val nav = navigator ?: return@LaunchedEffect
@@ -313,7 +339,8 @@ fun ReadiumNavigator(
                         configuration = EpubNavigatorFactory.Configuration(
                             defaults = EpubDefaults(
                                 scroll = false,
-                                publisherStyles = false
+                                publisherStyles = false,
+                                pageMargins = 0.4 // Reduce horizontal margins
                             )
                         )
                     )
@@ -327,31 +354,15 @@ fun ReadiumNavigator(
                             override fun onJumpToLocator(locator: Locator) {
                                 // Close HUD on jump
                             }
-                        }
+                        },
+                        configuration = EpubNavigatorFragment.Configuration(
+                            shouldApplyInsetsPadding = false // Reduce top/bottom gap
+                        )
                     ).instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
                 }
 
                 val nav = fragment as org.readium.r2.navigator.VisualNavigator
-                nav.addInputListener(object : InputListener {
-                    override fun onTap(event: TapEvent): Boolean {
-                        val view = nav.publicationView
-                        val width = view.width
-                        val x = event.point.x
-
-                        if (nav is org.readium.r2.navigator.OverflowableNavigator) {
-                            if (x < width * 0.2) {
-                                nav.goBackward(animated = true)
-                                return true
-                            } else if (x > width * 0.8) {
-                                nav.goForward(animated = true)
-                                return true
-                            }
-                        }
-
-                        onToggleHud()
-                        return true
-                    }
-                })
+                addInputListeners(nav)
 
                 fragmentManager.commitNow {
                     replace(containerId, fragment)
@@ -359,6 +370,11 @@ fun ReadiumNavigator(
                 
                 navigator = nav
             } else {
+                if (navigator == null && currentFragment is org.readium.r2.navigator.VisualNavigator) {
+                    addInputListeners(currentFragment)
+                    navigator = currentFragment
+                }
+
                 if (currentFragment.isAdded) {
                     if (currentFragment is EpubNavigatorFragment) {
                         currentFragment.submitPreferences(preferences)

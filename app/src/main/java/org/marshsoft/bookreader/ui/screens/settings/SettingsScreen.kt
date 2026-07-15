@@ -210,7 +210,7 @@ fun SettingsScreen(
                 TextButton(
                     onClick = { 
                         viewModel.viewModelScope.launch {
-                            app.syncRepository.syncAll()
+                            app.syncRepository.syncAll(context)
                         }
                     },
                     modifier = Modifier.padding(top = 8.dp)
