@@ -182,7 +182,7 @@ fun SettingsScreen(
 
             ListItem(
                 headlineContent = { Text("Sync Reading Progress") },
-                supportingContent = { Text("Keep your reading position synced across devices via Firestore") },
+                supportingContent = { Text("Keep your reading position synced across devices") },
                 leadingContent = { Icon(Icons.Default.Cloud, contentDescription = null) },
                 trailingContent = {
                     Switch(

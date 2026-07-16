@@ -3,12 +3,11 @@ package org.marshsoft.bookreader.ui
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.automirrored.filled.Login
 import androidx.compose.material.icons.automirrored.filled.Logout
-import androidx.compose.material.icons.filled.Explore
-import androidx.compose.material.icons.filled.Person
 import androidx.compose.material.icons.filled.PersonAdd
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.*
@@ -56,12 +55,6 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
 
     val isReaderScreen = currentRoute?.startsWith(Screen.Reader.route.substringBefore("{")) == true
-
-    val showBottomBar = currentRoute in listOf(
-        Screen.Library.route,
-        Screen.Discover.route,
-        Screen.Profile.route
-    )
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -183,47 +176,7 @@ fun MainScreen() {
         }
     ) {
         Scaffold(
-            contentWindowInsets = WindowInsets(0, 0, 0, 0),
-            bottomBar = {
-                if (showBottomBar) {
-                    NavigationBar(
-                        containerColor = MaterialTheme.colorScheme.surface,
-                        tonalElevation = 0.dp
-                    ) {
-                        val items = listOf(
-                            BottomNavItem("Library", Screen.Library.route,
-                                Icons.AutoMirrored.Filled.LibraryBooks
-                            ),
-                            BottomNavItem("Discover", Screen.Discover.route, Icons.Default.Explore),
-                            BottomNavItem("Profile", Screen.Profile.route, Icons.Default.Person)
-                        )
-
-                        items.forEach { item ->
-                            NavigationBarItem(
-                                icon = { Icon(item.icon, contentDescription = item.label, modifier = Modifier.size(24.dp)) },
-                                label = { Text(item.label, style = MaterialTheme.typography.labelSmall) },
-                                selected = currentRoute == item.route,
-                                onClick = {
-                                    if (currentRoute != item.route) {
-                                        navController.navigate(item.route) {
-                                            popUpTo(Screen.Library.route) { saveState = true }
-                                            launchSingleTop = true
-                                            restoreState = true
-                                        }
-                                    }
-                                },
-                                colors = NavigationBarItemDefaults.colors(
-                                    selectedIconColor = MaterialTheme.colorScheme.primary,
-                                    selectedTextColor = MaterialTheme.colorScheme.primary,
-                                    unselectedIconColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                    unselectedTextColor = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
-                                    indicatorColor = MaterialTheme.colorScheme.secondaryContainer
-                                )
-                            )
-                        }
-                    }
-                }
-            }
+            contentWindowInsets = WindowInsets(0, 0, 0, 0)
         ) { innerPadding ->
             NavGraph(
                 navController = navController,
@@ -233,5 +186,3 @@ fun MainScreen() {
         }
     }
 }
-
-data class BottomNavItem(val label: String, val route: String, val icon: ImageVector)

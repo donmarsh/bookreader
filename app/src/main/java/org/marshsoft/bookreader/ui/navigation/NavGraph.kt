@@ -8,7 +8,6 @@ import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
-import org.marshsoft.bookreader.ui.screens.library.DiscoverScreen
 import org.marshsoft.bookreader.ui.screens.library.LibraryScreen
 import org.marshsoft.bookreader.ui.screens.login.ForgotPasswordScreen
 import org.marshsoft.bookreader.ui.screens.login.LoginScreen
@@ -52,15 +51,6 @@ fun NavGraph(
                 onMenuClick = onMenuClick,
                 onBookClick = { bookId -> navController.navigate(Screen.Reader.createRoute(bookId)) }
             )
-        }
-        composable(Screen.Discover.route) {
-            DiscoverScreen()
-        }
-        composable(Screen.Profile.route) {
-            // Placeholder for Profile
-            Box(modifier = Modifier.fillMaxSize(), contentAlignment = androidx.compose.ui.Alignment.Center) {
-                Text("Profile Screen")
-            }
         }
         composable(Screen.Settings.route) {
             SettingsScreen(

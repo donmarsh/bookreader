@@ -10,16 +10,15 @@ import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.CreateNewFolder
+import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.*
-import androidx.compose.runtime.Composable
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.collectAsState
-import androidx.compose.runtime.getValue
-import androidx.compose.runtime.remember
+import androidx.compose.runtime.*
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -54,8 +53,15 @@ fun LibraryScreen(
     )
 
     val books by viewModel.books.collectAsState()
+    val searchQuery by viewModel.searchQuery.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
-    val currentReading = books.firstOrNull()
+    
+    var isSearchActive by remember { mutableStateOf(false) }
+    var showImportMenu by remember { mutableStateOf(false) }
+    var showFolderTypeDialog by remember { mutableStateOf(false) }
+    var pendingFolderUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    
+    val currentReading = if (searchQuery.isEmpty()) books.firstOrNull() else null
 
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -72,39 +78,104 @@ fun LibraryScreen(
         uri?.let { viewModel.importBook(context, it) }
     }
 
+    val folderLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenDocumentTree()
+    ) { uri ->
+        uri?.let { 
+            pendingFolderUri = it
+            showFolderTypeDialog = true
+        }
+    }
+
+    if (showFolderTypeDialog) {
+        FolderTypeDialog(
+            onDismiss = { showFolderTypeDialog = false },
+            onConfirm = { types ->
+                showFolderTypeDialog = false
+                pendingFolderUri?.let { uri ->
+                    viewModel.importFolder(context, uri, types)
+                }
+            }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
-            FloatingActionButton(
-                onClick = { launcher.launch(arrayOf("application/epub+zip", "application/pdf")) },
-                containerColor = MaterialTheme.colorScheme.primary,
-                contentColor = Color.White
-            ) {
-                Icon(Icons.Default.Add, contentDescription = "Import Book")
+            Column(horizontalAlignment = Alignment.End) {
+                if (showImportMenu) {
+                    SmallFloatingActionButton(
+                        onClick = { 
+                            showImportMenu = false
+                            launcher.launch(arrayOf("application/epub+zip", "application/pdf"))
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Add, contentDescription = "Import File")
+                    }
+                    SmallFloatingActionButton(
+                        onClick = { 
+                            showImportMenu = false
+                            folderLauncher.launch(null)
+                        },
+                        containerColor = MaterialTheme.colorScheme.secondaryContainer,
+                        modifier = Modifier.padding(bottom = 8.dp)
+                    ) {
+                        Icon(Icons.Default.CreateNewFolder, contentDescription = "Import Folder")
+                    }
+                }
+                
+                FloatingActionButton(
+                    onClick = { showImportMenu = !showImportMenu },
+                    containerColor = MaterialTheme.colorScheme.primary,
+                    contentColor = Color.White
+                ) {
+                    Icon(if (showImportMenu) Icons.Default.Close else Icons.Default.Add, contentDescription = "Import")
+                }
             }
         },
         topBar = {
-            TopAppBar(
-                title = {
-                    Text(
-                        "The Book Sanctuary",
-                        style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                    )
-                },
-                navigationIcon = {
-                    IconButton(onClick = onMenuClick) {
-                        Icon(Icons.Default.Menu, contentDescription = "Menu")
+            if (isSearchActive) {
+                SearchTopBar(
+                    query = searchQuery,
+                    onQueryChange = { viewModel.onSearchQueryChange(it) },
+                    onCloseClick = { 
+                        isSearchActive = false
+                        viewModel.onSearchQueryChange("")
                     }
-                },
-                actions = {
-                    IconButton(onClick = { /* TODO */ }) {
-                        Icon(Icons.Default.Search, contentDescription = "Search")
-                    }
-                },
-                colors = TopAppBarDefaults.topAppBarColors(
-                    containerColor = MaterialTheme.colorScheme.surface
                 )
-            )
+            } else {
+                TopAppBar(
+                    title = {
+                        Column {
+                            Text(
+                                "THE BOOK SANCTUARY",
+                                style = MaterialTheme.typography.labelSmall,
+                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                            )
+                            Text(
+                                "My Library",
+                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                            )
+                        }
+                    },
+                    windowInsets = WindowInsets.statusBars,
+                    navigationIcon = {
+                        IconButton(onClick = onMenuClick) {
+                            Icon(Icons.Default.Menu, contentDescription = "Menu")
+                        }
+                    },
+                    actions = {
+                        IconButton(onClick = { isSearchActive = true }) {
+                            Icon(Icons.Default.Search, contentDescription = "Search")
+                        }
+                    },
+                    colors = TopAppBarDefaults.topAppBarColors(
+                        containerColor = MaterialTheme.colorScheme.surface
+                    )
+                )
+            }
         }
     ) { padding ->
         LazyColumn(
@@ -260,6 +331,111 @@ fun LibraryScreen(
             }
         }
     }
+}
+
+@Composable
+fun FolderTypeDialog(
+    onDismiss: () -> Unit,
+    onConfirm: (Set<String>) -> Unit
+) {
+    var includeEpub by remember { mutableStateOf(true) }
+    var includePdf by remember { mutableStateOf(true) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Import Folder") },
+        text = {
+            Column {
+                Text("Select file types to search for:")
+                Spacer(modifier = Modifier.height(16.dp))
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = includeEpub, onCheckedChange = { includeEpub = it })
+                    Text("EPUB Files")
+                }
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Checkbox(checked = includePdf, onCheckedChange = { includePdf = it })
+                    Text("PDF Files")
+                }
+            }
+        },
+        confirmButton = {
+            TextButton(
+                onClick = {
+                    val types = mutableSetOf<String>()
+                    if (includeEpub) types.add("epub")
+                    if (includePdf) types.add("pdf")
+                    onConfirm(types)
+                },
+                enabled = includeEpub || includePdf
+            ) {
+                Text("Import")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
+}
+
+@OptIn(ExperimentalMaterial3Api::class)
+@Composable
+fun SearchTopBar(
+    query: String,
+    onQueryChange: (String) -> Unit,
+    onCloseClick: () -> Unit
+) {
+    TopAppBar(
+        title = {
+            Column {
+                Text(
+                    "SEARCHING LIBRARY",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                )
+                TextField(
+                    value = query,
+                    onValueChange = onQueryChange,
+                    modifier = Modifier
+                        .fillMaxWidth()
+                        .offset(x = (-16).dp), // Adjust for TextField default start padding to align with "SEARCHING"
+                    placeholder = { 
+                        Text(
+                            "Search by title or author...",
+                            style = MaterialTheme.typography.bodyLarge
+                        ) 
+                    },
+                    textStyle = MaterialTheme.typography.bodyLarge,
+                    colors = TextFieldDefaults.colors(
+                        focusedContainerColor = Color.Transparent,
+                        unfocusedContainerColor = Color.Transparent,
+                        disabledContainerColor = Color.Transparent,
+                        focusedIndicatorColor = Color.Transparent,
+                        unfocusedIndicatorColor = Color.Transparent,
+                        cursorColor = MaterialTheme.colorScheme.primary
+                    ),
+                    singleLine = true,
+                    trailingIcon = {
+                        if (query.isNotEmpty()) {
+                            IconButton(onClick = { onQueryChange("") }) {
+                                Icon(Icons.Default.Close, contentDescription = "Clear")
+                            }
+                        }
+                    }
+                )
+            }
+        },
+        windowInsets = WindowInsets.statusBars,
+        navigationIcon = {
+            IconButton(onClick = onCloseClick) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+            }
+        },
+        colors = TopAppBarDefaults.topAppBarColors(
+            containerColor = MaterialTheme.colorScheme.surface
+        )
+    )
 }
 
 @Composable

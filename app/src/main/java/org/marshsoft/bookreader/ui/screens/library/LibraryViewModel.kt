@@ -6,13 +6,17 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.collectLatest
+import kotlinx.coroutines.flow.SharingStarted
+import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
 import org.marshsoft.bookreader.data.repository.SyncRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
+import androidx.documentfile.provider.DocumentFile
 import java.io.File
 
 data class LibraryUiState(
@@ -26,7 +30,19 @@ class LibraryViewModel(
 ) : ViewModel() {
 
     private val _books = MutableStateFlow<List<Book>>(emptyList())
-    val books: StateFlow<List<Book>> = _books
+    private val _searchQuery = MutableStateFlow("")
+    val searchQuery: StateFlow<String> = _searchQuery
+
+    val books: StateFlow<List<Book>> = combine(_books, _searchQuery) { books, query ->
+        if (query.isBlank()) {
+            books
+        } else {
+            books.filter { 
+                it.title.contains(query, ignoreCase = true) || 
+                it.author.contains(query, ignoreCase = true)
+            }
+        }
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     private val _uiState = MutableStateFlow(LibraryUiState())
     val uiState: StateFlow<LibraryUiState> = _uiState
@@ -41,12 +57,74 @@ class LibraryViewModel(
 
     fun importBook(context: android.content.Context, uri: Uri) {
         viewModelScope.launch {
-            val originalFileName = bookParser.getFileName(uri) ?: "Unknown Book"
+            val result = importBookInternal(context, uri, null)
+            when (result) {
+                ImportResult.DUPLICATE -> _uiState.value = _uiState.value.copy(message = "This book is already in your library")
+                ImportResult.FAILURE -> _uiState.value = _uiState.value.copy(message = "Failed to import book")
+                else -> { /* Success */ }
+            }
+        }
+    }
+
+    fun importFolder(context: android.content.Context, treeUri: Uri, allowedTypes: Set<String>) {
+        viewModelScope.launch {
+            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@launch
+            val files = mutableListOf<DocumentFile>()
+            
+            fun collectFiles(dir: DocumentFile) {
+                dir.listFiles().forEach { file ->
+                    if (file.isDirectory) {
+                        collectFiles(file)
+                    } else {
+                        val name = file.name?.lowercase() ?: ""
+                        if ((allowedTypes.contains("epub") && name.endsWith(".epub")) ||
+                            (allowedTypes.contains("pdf") && name.endsWith(".pdf"))) {
+                            files.add(file)
+                        }
+                    }
+                }
+            }
+            
+            collectFiles(root)
+            
+            if (files.isEmpty()) {
+                _uiState.value = _uiState.value.copy(message = "No matching books found in folder")
+                return@launch
+            }
+            
+            _uiState.value = _uiState.value.copy(message = "Importing ${files.size} books...")
+            
+            var importedCount = 0
+            var duplicateCount = 0
+            
+            files.forEach { file ->
+                val result = importBookInternal(context, file.uri, file.name)
+                if (result == ImportResult.SUCCESS) importedCount++
+                else if (result == ImportResult.DUPLICATE) duplicateCount++
+            }
+            
+            val finalMessage = buildString {
+                append("Imported $importedCount books.")
+                if (duplicateCount > 0) append(" $duplicateCount duplicates skipped.")
+            }
+            _uiState.value = _uiState.value.copy(message = finalMessage)
+        }
+    }
+
+    private enum class ImportResult { SUCCESS, DUPLICATE, FAILURE }
+
+    private suspend fun importBookInternal(
+        context: android.content.Context, 
+        uri: Uri, 
+        providedFileName: String?
+    ): ImportResult {
+        return try {
+            val originalFileName = providedFileName ?: bookParser.getFileName(uri) ?: "Unknown Book"
             val fileType = if (originalFileName.endsWith(".epub", true) || 
                             uri.toString().endsWith(".epub", true)) "epub" else "pdf"
 
-            val fileName = "book_${System.currentTimeMillis()}.$fileType"
-            val filePath = bookParser.saveFileToInternal(uri, fileName) ?: return@launch
+            val fileName = "book_${System.currentTimeMillis()}_${(0..1000).random()}.$fileType"
+            val filePath = bookParser.saveFileToInternal(uri, fileName) ?: return ImportResult.FAILURE
             
             var title = originalFileName.substringBeforeLast(".")
             var author = "Unknown Author"
@@ -114,10 +192,9 @@ class LibraryViewModel(
             }
 
             if (isDuplicate) {
-                _uiState.value = _uiState.value.copy(message = "This book is already in your library")
                 File(filePath).delete()
                 coverPath?.let { File(it).delete() }
-                return@launch
+                return ImportResult.DUPLICATE
             }
 
             val entity = BookEntity(
@@ -134,6 +211,10 @@ class LibraryViewModel(
             )
             bookDao.insertBook(entity)
             syncRepository.uploadBook(entity, context)
+            ImportResult.SUCCESS
+        } catch (e: Exception) {
+            e.printStackTrace()
+            ImportResult.FAILURE
         }
     }
 
@@ -156,6 +237,10 @@ class LibraryViewModel(
                 e.printStackTrace()
             }
         }
+    }
+
+    fun onSearchQueryChange(query: String) {
+        _searchQuery.value = query
     }
 
     private fun BookEntity.toDomain() = Book(

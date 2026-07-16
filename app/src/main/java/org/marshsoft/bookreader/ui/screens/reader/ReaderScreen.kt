@@ -1,5 +1,6 @@
 package org.marshsoft.bookreader.ui.screens.reader
 
+import android.app.Activity
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -7,10 +8,14 @@ import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.asPaddingValues
+import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
@@ -32,14 +37,14 @@ import androidx.compose.material3.Surface
 import androidx.compose.material3.Text
 import androidx.compose.material3.TopAppBarDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.runtime.saveable.rememberSaveable
-import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
@@ -47,6 +52,8 @@ import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.core.view.WindowCompat
+import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import androidx.fragment.app.commitNow
@@ -106,6 +113,39 @@ fun ReaderScreen(
 
     val book = uiState.book ?: return
     val publication = uiState.publication
+
+    // Determine the background color based on Readium theme
+    val readerBackground = when (uiState.preferences.theme) {
+        Theme.DARK -> Color(0xFF121212) // Material Dark Surface
+        Theme.SEPIA -> Color(0xFFF5EBCF) // Traditional Sepia
+        else -> Color.White // Pure White for LIGHT
+    }
+
+    val contentColor = when (uiState.preferences.theme) {
+        Theme.DARK -> Color.White
+        else -> Color.Black
+    }
+
+    // Handle Status Bar Visibility
+    val activity = context as? Activity
+    val window = activity?.window
+    if (window != null) {
+        val insetsController = WindowCompat.getInsetsController(window, window.decorView)
+        LaunchedEffect(uiState.isHudVisible) {
+            if (uiState.isHudVisible) {
+                insetsController.show(WindowInsetsCompat.Type.statusBars())
+            } else {
+                insetsController.hide(WindowInsetsCompat.Type.statusBars())
+            }
+        }
+        
+        // Ensure status bar is restored when leaving the screen
+        DisposableEffect(Unit) {
+            onDispose {
+                insetsController.show(WindowInsetsCompat.Type.statusBars())
+            }
+        }
+    }
     
     var sliderProgress by remember { mutableStateOf(book.progress) }
     LaunchedEffect(book.progress) {
@@ -113,50 +153,26 @@ fun ReaderScreen(
     }
 
     Scaffold(
-        topBar = {
-            AnimatedVisibility(
-                visible = uiState.isHudVisible,
-                enter = slideInVertically(initialOffsetY = { -it }),
-                exit = slideOutVertically(targetOffsetY = { -it })
-            ) {
-                CenterAlignedTopAppBar(
-                    title = {
-                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                            Text(
-                                book.author.uppercase(),
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                            Text(
-                                book.title,
-                                style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
-                                maxLines = 1,
-                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
-                            )
-                        }
-                    },
-                    navigationIcon = {
-                        IconButton(onClick = onBackClick) {
-                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { /* TODO */ }) {
-                            Icon(Icons.Default.MoreVert, contentDescription = "More")
-                        }
-                    },
-                    colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
-                    )
-                )
-            }
-        }
+        contentWindowInsets = WindowInsets(0, 0, 0, 0),
+        containerColor = readerBackground
     ) { padding ->
+        // We handle insets manually to avoid reader resizing when HUD toggles
+        val cutoutPadding = WindowInsets.displayCutout.asPaddingValues().calculateTopPadding()
+        // If there's no cutout (0.dp), we use a small default to avoid sticking to the very top
+        val safeTopPadding = if (cutoutPadding > 0.dp) cutoutPadding + 4.dp else 12.dp
+
         Box(
             modifier = Modifier
                 .fillMaxSize()
         ) {
-            Box(modifier = Modifier.fillMaxSize()) {
+            // Reader Content - Full screen to allow overlay without resizing
+            // Dynamically calculated padding to start exactly below the camera hole/notch
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(top = safeTopPadding)
+                    .padding(horizontal = 12.dp)
+            ) {
                 if (publication != null) {
                     ReadiumNavigator(
                         publication = publication,
@@ -170,8 +186,62 @@ fun ReaderScreen(
                     )
                 } else {
                     Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-                        Text("Opening publication...")
+                        Text("Opening Book...")
                     }
+                }
+            }
+
+            // HUD Top Bar - Overlays the reader without resizing it
+            AnimatedVisibility(
+                visible = uiState.isHudVisible,
+                enter = slideInVertically(initialOffsetY = { -it }),
+                exit = slideOutVertically(targetOffsetY = { -it })
+            ) {
+                Surface(
+                    color = readerBackground.copy(alpha = 0.98f),
+                    contentColor = contentColor,
+                    tonalElevation = 2.dp
+                ) {
+                    CenterAlignedTopAppBar(
+                        title = {
+                            Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                                Text(
+                                    book.author.uppercase(),
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = contentColor.copy(alpha = 0.5f)
+                                )
+                                Text(
+                                    book.title,
+                                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                                    maxLines = 1,
+                                    overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                                )
+                            }
+                        },
+                        windowInsets = WindowInsets.statusBars,
+                        navigationIcon = {
+                            IconButton(onClick = onBackClick) {
+                                Icon(
+                                    Icons.AutoMirrored.Filled.ArrowBack, 
+                                    contentDescription = "Back",
+                                    tint = contentColor
+                                )
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { /* TODO */ }) {
+                                Icon(
+                                    Icons.Default.MoreVert, 
+                                    contentDescription = "More",
+                                    tint = contentColor
+                                )
+                            }
+                        },
+                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                            containerColor = Color.Transparent,
+                            titleContentColor = contentColor
+                        )
+                    )
                 }
             }
 
@@ -195,11 +265,12 @@ fun ReaderScreen(
             ) {
                 Surface(
                     modifier = Modifier
-                        .padding(bottom = padding.calculateBottomPadding() + 40.dp)
+                        .padding(bottom = 20.dp)
                         .width(320.dp)
                         .height(64.dp),
                     shape = RoundedCornerShape(16.dp),
-                    color = MaterialTheme.colorScheme.surface.copy(alpha = 0.9f),
+                    color = readerBackground.copy(alpha = 0.98f),
+                    contentColor = contentColor,
                     tonalElevation = 8.dp,
                     shadowElevation = 8.dp
                 ) {
@@ -212,7 +283,11 @@ fun ReaderScreen(
                             val nextSize = if ((uiState.preferences.fontSize ?: 1.0) >= 2.0) 0.5 else (uiState.preferences.fontSize ?: 1.0) + 0.2
                             viewModel.updateFontSize(nextSize)
                         }) {
-                            Icon(Icons.Default.TextFields, contentDescription = "Font settings")
+                            Icon(
+                                Icons.Default.TextFields, 
+                                contentDescription = "Font settings",
+                                tint = contentColor
+                            )
                         }
                         IconButton(onClick = {
                             val nextTheme = when (uiState.preferences.theme) {
@@ -223,7 +298,8 @@ fun ReaderScreen(
                         }) {
                             Icon(
                                 if (uiState.preferences.theme == Theme.DARK) Icons.Default.Brightness7 else Icons.Default.Brightness4,
-                                contentDescription = "Theme"
+                                contentDescription = "Theme",
+                                tint = contentColor
                             )
                         }
                         
@@ -231,14 +307,19 @@ fun ReaderScreen(
                             value = sliderProgress,
                             onValueChange = { sliderProgress = it },
                             onValueChangeFinished = { viewModel.seekTo(sliderProgress) },
-                            modifier = Modifier.weight(1f)
+                            modifier = Modifier.weight(1f),
+                            colors = androidx.compose.material3.SliderDefaults.colors(
+                                thumbColor = contentColor,
+                                activeTrackColor = contentColor,
+                                inactiveTrackColor = contentColor.copy(alpha = 0.2f)
+                            )
                         )
                         
                         val currentPage = uiState.totalPages?.let { (sliderProgress * it).toInt().coerceIn(1, it) }
                         Text(
                             if (currentPage != null) "P. $currentPage / ${uiState.totalPages}" else "${(book.progress * 100).toInt()}%",
                             style = MaterialTheme.typography.labelSmall,
-                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                            color = contentColor.copy(alpha = 0.6f)
                         )
                     }
                 }
@@ -340,7 +421,7 @@ fun ReadiumNavigator(
                             defaults = EpubDefaults(
                                 scroll = false,
                                 publisherStyles = false,
-                                pageMargins = 0.4 // Reduce horizontal margins
+                                pageMargins = 0.1 // Balanced margins for side curvature
                             )
                         )
                     )
@@ -356,7 +437,7 @@ fun ReadiumNavigator(
                             }
                         },
                         configuration = EpubNavigatorFragment.Configuration(
-                            shouldApplyInsetsPadding = false // Reduce top/bottom gap
+                            shouldApplyInsetsPadding = false // Fully immersive, no extra space for system bars
                         )
                     ).instantiate(activity.classLoader, EpubNavigatorFragment::class.java.name) as EpubNavigatorFragment
                 }

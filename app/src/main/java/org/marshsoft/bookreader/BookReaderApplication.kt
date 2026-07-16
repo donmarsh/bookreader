@@ -10,6 +10,7 @@ import org.marshsoft.bookreader.data.repository.GoogleDriveRepository
 import org.marshsoft.bookreader.data.repository.SyncRepository
 import org.marshsoft.bookreader.data.sync.SyncWorker
 import org.marshsoft.bookreader.util.BookParser
+import com.google.android.gms.security.ProviderInstaller
 import java.util.concurrent.TimeUnit
 
 class BookReaderApplication : Application() {
@@ -22,6 +23,19 @@ class BookReaderApplication : Application() {
 
     override fun onCreate() {
         super.onCreate()
+        
+        // Initialize ProviderInstaller to ensure security provider is up to date
+        // and avoid issues with GMS API calls.
+        ProviderInstaller.installIfNeededAsync(this, object : ProviderInstaller.ProviderInstallListener {
+            override fun onProviderInstalled() {
+                // Provider is up to date
+            }
+
+            override fun onProviderInstallFailed(errorCode: Int, recoveryIntent: android.content.Intent?) {
+                // Handle failure if necessary
+            }
+        })
+
         database = Room.databaseBuilder(
             this,
             BookDatabase::class.java,

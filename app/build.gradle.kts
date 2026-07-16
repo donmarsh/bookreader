@@ -69,6 +69,7 @@ dependencies {
     implementation(libs.androidx.lifecycle.runtime.ktx)
     implementation(libs.androidx.navigation.compose)
     implementation(libs.androidx.fragment.ktx)
+    implementation(libs.androidx.documentfile)
     implementation(libs.coil.compose)
     implementation(libs.coil.network)
     implementation(libs.androidx.compose.ui.text.google.fonts)
@@ -83,6 +84,7 @@ dependencies {
     implementation(libs.androidx.credentials)
     implementation(libs.androidx.credentials.play.services.auth)
     implementation(libs.play.services.auth)
+    implementation(libs.gms.base)
     implementation(libs.googleid)
 
     // WorkManager
