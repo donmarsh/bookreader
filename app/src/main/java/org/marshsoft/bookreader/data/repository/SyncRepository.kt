@@ -10,7 +10,9 @@ import kotlinx.coroutines.tasks.await
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
 import org.marshsoft.bookreader.data.local.SyncPreferences
+import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.first
+import kotlinx.coroutines.flow.flow
 
 class SyncRepository(
     private val context: Context,
@@ -19,6 +21,13 @@ class SyncRepository(
     private val syncPreferences: SyncPreferences,
     private val googleDriveRepository: GoogleDriveRepository
 ) {
+    sealed class SyncStatus {
+        object Idle : SyncStatus()
+        data class Progress(val current: Int, val total: Int, val message: String) : SyncStatus()
+        object Success : SyncStatus()
+        data class Error(val message: String) : SyncStatus()
+    }
+
     private val firestore: FirebaseFirestore = Firebase.firestore
 
     suspend fun syncProgress(book: BookEntity) {
@@ -70,11 +79,23 @@ class SyncRepository(
         googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType)
     }
 
-    suspend fun syncAll(activityContext: Context? = null) {
-        if (!syncPreferences.isSyncEnabled) return
+    suspend fun syncAll(activityContext: Context? = null): Flow<SyncStatus> = flow {
+        if (!syncPreferences.isSyncEnabled) {
+            emit(SyncStatus.Error("Sync is disabled in settings"))
+            return@flow
+        }
+        
         try {
             val books = bookDao.getAllBooks().first()
-            for (book in books) {
+            if (books.isEmpty()) {
+                emit(SyncStatus.Success)
+                return@flow
+            }
+
+            emit(SyncStatus.Progress(0, books.size, "Starting sync..."))
+            
+            for ((index, book) in books.withIndex()) {
+                emit(SyncStatus.Progress(index + 1, books.size, "Syncing ${book.title}..."))
                 syncProgress(book)
                 
                 // If book file is missing and Drive sync is enabled, try to restore
@@ -87,8 +108,10 @@ class SyncRepository(
                     }
                 }
             }
+            emit(SyncStatus.Success)
         } catch (e: Exception) {
             e.printStackTrace()
+            emit(SyncStatus.Error(e.message ?: "Unknown error occurred during sync"))
         }
     }
 }

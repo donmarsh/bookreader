@@ -34,12 +34,14 @@ import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import org.marshsoft.bookreader.BookReaderApplication
 import org.marshsoft.bookreader.domain.model.Book
+import org.marshsoft.bookreader.data.repository.SyncRepository
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun LibraryScreen(
     onMenuClick: () -> Unit,
-    onBookClick: (String) -> Unit
+    onBookClick: (String) -> Unit,
+    onLoginClick: () -> Unit
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as BookReaderApplication
@@ -47,7 +49,13 @@ fun LibraryScreen(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return LibraryViewModel(app.database.bookDao(), app.bookParser, app.syncRepository) as T
+                return LibraryViewModel(
+                    app.database.bookDao(), 
+                    app.bookParser, 
+                    app.syncRepository,
+                    app.syncPreferences,
+                    app.authRepository
+                ) as T
             }
         }
     )
@@ -56,14 +64,27 @@ fun LibraryScreen(
     val searchQuery by viewModel.searchQuery.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
     
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(uiState.syncStatus) {
+        val status = uiState.syncStatus
+        when (status) {
+            is SyncRepository.SyncStatus.Success -> {
+                snackbarHostState.showSnackbar("Library sync completed successfully")
+            }
+            is SyncRepository.SyncStatus.Error -> {
+                snackbarHostState.showSnackbar(status.message)
+            }
+            else -> {}
+        }
+    }
+
     var isSearchActive by remember { mutableStateOf(false) }
     var showImportMenu by remember { mutableStateOf(false) }
     var showFolderTypeDialog by remember { mutableStateOf(false) }
     var pendingFolderUri by remember { mutableStateOf<android.net.Uri?>(null) }
     
     val currentReading = if (searchQuery.isEmpty()) books.firstOrNull() else null
-
-    val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.message) {
         uiState.message?.let {
@@ -96,6 +117,17 @@ fun LibraryScreen(
                     viewModel.importFolder(context, uri, types)
                 }
             }
+        )
+    }
+
+    if (uiState.showFirstRunPrompt) {
+        val currentUser by app.authRepository.currentUser.collectAsState()
+        FirstRunSyncDialog(
+            onDismiss = { viewModel.dismissFirstRunPrompt() },
+            onSignInClick = onLoginClick,
+            onSyncClick = { viewModel.syncLibrary(context) },
+            isUserLoggedIn = currentUser != null,
+            syncStatus = uiState.syncStatus
         )
     }
 
@@ -331,6 +363,63 @@ fun LibraryScreen(
             }
         }
     }
+}
+
+@Composable
+fun FirstRunSyncDialog(
+    onDismiss: () -> Unit,
+    onSignInClick: () -> Unit,
+    onSyncClick: () -> Unit,
+    isUserLoggedIn: Boolean,
+    syncStatus: SyncRepository.SyncStatus
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Welcome to Book Sanctuary") },
+        text = {
+            Column {
+                Text(
+                    if (isUserLoggedIn) 
+                        "Welcome back! Would you like to sync your existing library and progress?" 
+                    else 
+                        "Sign in with Google to keep your books and reading progress synced across all your devices."
+                )
+                
+                if (syncStatus is SyncRepository.SyncStatus.Progress) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        LinearProgressIndicator(
+                            progress = { syncStatus.current.toFloat() / syncStatus.total },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = syncStatus.message,
+                            style = MaterialTheme.typography.bodySmall
+                        )
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            if (!isUserLoggedIn) {
+                Button(onClick = onSignInClick) {
+                    Text("Sign In")
+                }
+            } else {
+                if (syncStatus !is SyncRepository.SyncStatus.Progress) {
+                    Button(onClick = onSyncClick) {
+                        Text("Sync Now")
+                    }
+                }
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss, enabled = syncStatus !is SyncRepository.SyncStatus.Progress) {
+                Text("Later")
+            }
+        }
+    )
 }
 
 @Composable

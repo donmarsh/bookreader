@@ -21,17 +21,25 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewModelScope
 import androidx.lifecycle.viewmodel.compose.viewModel
 import com.google.android.gms.auth.api.identity.Identity
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.BookReaderApplication
 import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.repository.AuthRepository
+import org.marshsoft.bookreader.data.repository.SyncRepository
 
 class SettingsViewModel(
     private val authRepository: AuthRepository,
-    private val syncPreferences: SyncPreferences
+    private val syncPreferences: SyncPreferences,
+    private val syncRepository: SyncRepository
 ) : ViewModel() {
     val currentUser = authRepository.currentUser
     
+    private val _syncStatus = MutableStateFlow<SyncRepository.SyncStatus>(SyncRepository.SyncStatus.Idle)
+    val syncStatus: StateFlow<SyncRepository.SyncStatus> = _syncStatus.asStateFlow()
+
     var isSyncEnabled by mutableStateOf(syncPreferences.isSyncEnabled)
         private set
 
@@ -87,6 +95,18 @@ class SettingsViewModel(
             syncPreferences.isDriveSyncEnabled = false
         }
     }
+
+    fun syncAll(context: Context) {
+        viewModelScope.launch {
+            syncRepository.syncAll(context).collect { status ->
+                _syncStatus.value = status
+            }
+        }
+    }
+
+    fun clearSyncStatus() {
+        _syncStatus.value = SyncRepository.SyncStatus.Idle
+    }
 }
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -101,12 +121,28 @@ fun SettingsScreen(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return SettingsViewModel(app.authRepository, app.syncPreferences) as T
+                return SettingsViewModel(app.authRepository, app.syncPreferences, app.syncRepository) as T
             }
         }
     )
 
     val user by viewModel.currentUser.collectAsState()
+    val syncStatus by viewModel.syncStatus.collectAsState()
+    val snackbarHostState = remember { SnackbarHostState() }
+
+    LaunchedEffect(syncStatus) {
+        when (syncStatus) {
+            is SyncRepository.SyncStatus.Success -> {
+                snackbarHostState.showSnackbar("Library sync completed successfully")
+                viewModel.clearSyncStatus()
+            }
+            is SyncRepository.SyncStatus.Error -> {
+                snackbarHostState.showSnackbar((syncStatus as SyncRepository.SyncStatus.Error).message)
+                viewModel.clearSyncStatus()
+            }
+            else -> {}
+        }
+    }
     
     val driveAuthLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.StartIntentSenderForResult()
@@ -119,6 +155,7 @@ fun SettingsScreen(
     }
 
     Scaffold(
+        snackbarHost = { SnackbarHost(snackbarHostState) },
         topBar = {
             CenterAlignedTopAppBar(
                 title = { Text("Settings") },
@@ -207,17 +244,31 @@ fun SettingsScreen(
             )
             
             if (viewModel.isSyncEnabled) {
-                TextButton(
-                    onClick = { 
-                        viewModel.viewModelScope.launch {
-                            app.syncRepository.syncAll(context)
-                        }
-                    },
-                    modifier = Modifier.padding(top = 8.dp)
-                ) {
-                    Icon(Icons.Default.Sync, contentDescription = null)
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("Sync Now")
+                Spacer(modifier = Modifier.height(16.dp))
+                
+                if (syncStatus is SyncRepository.SyncStatus.Progress) {
+                    val progress = syncStatus as SyncRepository.SyncStatus.Progress
+                    Column(modifier = Modifier.fillMaxWidth()) {
+                        LinearProgressIndicator(
+                            progress = { progress.current.toFloat() / progress.total },
+                            modifier = Modifier.fillMaxWidth()
+                        )
+                        Spacer(modifier = Modifier.height(4.dp))
+                        Text(
+                            text = progress.message,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                        )
+                    }
+                } else {
+                    TextButton(
+                        onClick = { viewModel.syncAll(context) },
+                        modifier = Modifier.padding(top = 8.dp)
+                    ) {
+                        Icon(Icons.Default.Sync, contentDescription = null)
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Sync Now")
+                    }
                 }
             }
         }

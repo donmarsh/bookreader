@@ -29,6 +29,7 @@ googleid = "1.2.0"
 work = "2.11.2"
 documentfile = "1.1.0"
 googleServices = "4.5.0"
+firebaseCrashlyticsPlugin = "3.0.3"
 googleDrive = "v3-rev20241027-2.0.0"
 googleApiClient = "2.9.0"
 googleHttpClient = "2.1.1"
@@ -79,6 +80,7 @@ firebase-bom = { group = "com.google.firebase", name = "firebase-bom", version.r
 firebase-auth = { group = "com.google.firebase", name = "firebase-auth" }
 firebase-firestore = { group = "com.google.firebase", name = "firebase-firestore" }
 firebase-storage = { group = "com.google.firebase", name = "firebase-storage" }
+firebase-crashlytics = { group = "com.google.firebase", name = "firebase-crashlytics" }
 
 # Credentials & Auth
 androidx-credentials = { group = "androidx.credentials", name = "credentials", version.ref = "credentials" }
@@ -109,4 +111,5 @@ kotlin-android = { id = "org.jetbrains.kotlin.android", version.ref = "kotlin" }
 hilt = { id = "com.google.dagger.hilt.android", version.ref = "hilt" }
 ksp = { id = "com.google.devtools.ksp", version = "2.3.9" }
 google-services = { id = "com.google.gms.google-services", version.ref = "googleServices" }
+firebase-crashlytics = { id = "com.google.firebase.crashlytics", version.ref = "firebaseCrashlyticsPlugin" }
 

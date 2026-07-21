@@ -12,4 +12,8 @@ class SyncPreferences(context: Context) {
     var isDriveSyncEnabled: Boolean
         get() = prefs.getBoolean("is_drive_sync_enabled", false)
         set(value) = prefs.edit().putBoolean("is_drive_sync_enabled", value).apply()
+
+    var isFirstRun: Boolean
+        get() = prefs.getBoolean("is_first_run", true)
+        set(value) = prefs.edit().putBoolean("is_first_run", value).apply()
 }

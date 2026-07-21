@@ -46,7 +46,8 @@ fun NavGraph(
         composable(Screen.Library.route) {
             LibraryScreen(
                 onMenuClick = onMenuClick,
-                onBookClick = { bookId -> navController.navigate(Screen.Reader.createRoute(bookId)) }
+                onBookClick = { bookId -> navController.navigate(Screen.Reader.createRoute(bookId)) },
+                onLoginClick = { navController.navigate(Screen.Login.route) }
             )
         }
         composable(Screen.Settings.route) {

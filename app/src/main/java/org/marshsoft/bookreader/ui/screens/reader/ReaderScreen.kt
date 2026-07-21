@@ -118,7 +118,7 @@ fun ReaderScreen(
     val readerBackground = when (uiState.preferences.theme) {
         Theme.DARK -> Color(0xFF121212) // Material Dark Surface
         Theme.SEPIA -> Color(0xFFF5EBCF) // Traditional Sepia
-        else -> Color.White // Pure White for LIGHT
+        else -> Color(0xFFFCF9F4) // Match DESIGN.md surface (#fcf9f4)
     }
 
     val contentColor = when (uiState.preferences.theme) {

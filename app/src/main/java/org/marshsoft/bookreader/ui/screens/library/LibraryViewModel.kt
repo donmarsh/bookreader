@@ -13,20 +13,26 @@ import kotlinx.coroutines.flow.stateIn
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
+import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.repository.SyncRepository
+import org.marshsoft.bookreader.data.repository.AuthRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
 import androidx.documentfile.provider.DocumentFile
 import java.io.File
 
 data class LibraryUiState(
-    val message: String? = null
+    val message: String? = null,
+    val showFirstRunPrompt: Boolean = false,
+    val syncStatus: SyncRepository.SyncStatus = SyncRepository.SyncStatus.Idle
 )
 
 class LibraryViewModel(
     private val bookDao: BookDao,
     private val bookParser: BookParser,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val syncPreferences: SyncPreferences,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _books = MutableStateFlow<List<Book>>(emptyList())
@@ -51,6 +57,28 @@ class LibraryViewModel(
         viewModelScope.launch {
             bookDao.getAllBooks().collectLatest { entities ->
                 _books.value = entities.map { it.toDomain() }
+            }
+        }
+
+        if (syncPreferences.isFirstRun) {
+            _uiState.value = _uiState.value.copy(showFirstRunPrompt = true)
+        }
+    }
+
+    fun dismissFirstRunPrompt() {
+        syncPreferences.isFirstRun = false
+        _uiState.value = _uiState.value.copy(showFirstRunPrompt = false)
+    }
+
+    fun syncLibrary(context: android.content.Context) {
+        viewModelScope.launch {
+            syncRepository.syncAll(context).collect { status ->
+                _uiState.value = _uiState.value.copy(syncStatus = status)
+                
+                if (status is SyncRepository.SyncStatus.Success || status is SyncRepository.SyncStatus.Error) {
+                    syncPreferences.isFirstRun = false
+                    _uiState.value = _uiState.value.copy(showFirstRunPrompt = false)
+                }
             }
         }
     }
