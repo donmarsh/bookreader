@@ -2,6 +2,7 @@ package org.marshsoft.bookreader.util
 
 import android.content.Context
 import android.graphics.Bitmap
+import android.graphics.BitmapFactory
 import android.net.Uri
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.withContext
@@ -34,7 +35,41 @@ class BookParser(private val context: Context) {
 
     suspend fun getCover(publication: Publication): Bitmap? = withContext(Dispatchers.IO) {
         try {
-            publication.findService(CoverService::class)?.cover()
+            // 1. Try standard CoverService (handles standard EPUB cover metadata)
+            val cover = publication.findService(CoverService::class)?.cover()
+            if (cover != null) return@withContext cover
+
+            // 2. Fallback: Manually search for items that look like covers in the manifest
+            // We search both resources and links for common naming patterns or rel="cover"
+            val allLinks = publication.resources + publication.links
+            val coverLink = allLinks.firstOrNull { link ->
+                link.rels.contains("cover") || 
+                link.href.toString().contains("cover", ignoreCase = true) ||
+                link.href.toString().contains("folder", ignoreCase = true) ||
+                link.href.toString().contains("front", ignoreCase = true) ||
+                link.href.toString().contains("thumb", ignoreCase = true)
+            }
+
+            if (coverLink != null) {
+                // Use the publication's fetcher to get the raw bytes of the potential cover
+                val resource = publication.get(coverLink)
+                val bytes = resource?.read()?.getOrNull()
+                if (bytes != null) {
+                    val bitmap = BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                    if (bitmap != null) return@withContext bitmap
+                }
+            }
+
+            // 3. Last Resort: Try the first image resource we can find in the entire package
+            val firstImageLink = allLinks.firstOrNull { it.mediaType?.type == "image" }
+            if (firstImageLink != null) {
+                val bytes = publication.get(firstImageLink)?.read()?.getOrNull()
+                if (bytes != null) {
+                    return@withContext BitmapFactory.decodeByteArray(bytes, 0, bytes.size)
+                }
+            }
+
+            null
         } catch (e: Exception) {
             e.printStackTrace()
             null

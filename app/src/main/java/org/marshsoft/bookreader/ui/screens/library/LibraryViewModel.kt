@@ -1,6 +1,7 @@
 package org.marshsoft.bookreader.ui.screens.library
 
 import android.net.Uri
+import android.text.Html
 import android.util.Log
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
@@ -15,7 +16,6 @@ import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
 import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.repository.SyncRepository
-import org.marshsoft.bookreader.data.repository.AuthRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
 import androidx.documentfile.provider.DocumentFile
@@ -31,8 +31,7 @@ class LibraryViewModel(
     private val bookDao: BookDao,
     private val bookParser: BookParser,
     private val syncRepository: SyncRepository,
-    private val syncPreferences: SyncPreferences,
-    private val authRepository: AuthRepository
+    private val syncPreferences: SyncPreferences
 ) : ViewModel() {
 
     private val _books = MutableStateFlow<List<Book>>(emptyList())
@@ -200,7 +199,9 @@ class LibraryViewModel(
                 }
 
                 author = dcAuthor ?: publication.metadata.authors.firstOrNull()?.localizedName?.string ?: author
-                description = publication.metadata.description
+                description = publication.metadata.description?.let { 
+                    Html.fromHtml(it, Html.FROM_HTML_MODE_COMPACT).toString().trim()
+                }
                 publisher = publication.metadata.publishers.firstOrNull()?.localizedName?.string
                 publishedDate = publication.metadata.published?.toString()
                 language = publication.metadata.languages.firstOrNull()
@@ -279,7 +280,9 @@ class LibraryViewModel(
         coverUrl = coverPath,
         filePath = filePath,
         fileType = fileType,
-        description = description,
+        description = description?.let { 
+            Html.fromHtml(it, Html.FROM_HTML_MODE_COMPACT).toString().trim()
+        },
         publisher = publisher,
         publishedDate = publishedDate,
         language = language,

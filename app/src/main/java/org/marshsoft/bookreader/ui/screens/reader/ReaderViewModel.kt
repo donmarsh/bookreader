@@ -1,6 +1,7 @@
 package org.marshsoft.bookreader.ui.screens.reader
 
 import androidx.lifecycle.ViewModel
+import android.text.Html
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -8,6 +9,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
+import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.repository.SyncRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.readium.r2.shared.publication.Publication
@@ -16,9 +18,10 @@ import org.readium.r2.shared.publication.services.PositionsService
 import org.readium.r2.navigator.epub.EpubPreferences
 import org.readium.r2.navigator.preferences.Theme
 import org.marshsoft.bookreader.util.BookParser
+import org.readium.r2.shared.ExperimentalReadiumApi
 import java.io.File
 
-data class ReaderUiState(
+data class ReaderUiState @OptIn(ExperimentalReadiumApi::class) constructor(
     val book: Book? = null,
     val publication: Publication? = null,
     val totalPages: Int? = null,
@@ -33,10 +36,24 @@ class ReaderViewModel(
     private val bookId: String,
     private val bookDao: BookDao,
     private val bookParser: BookParser,
-    private val syncRepository: SyncRepository
+    private val syncRepository: SyncRepository,
+    private val syncPreferences: SyncPreferences
 ) : ViewModel() {
 
-    private val _uiState = MutableStateFlow(ReaderUiState())
+    @OptIn(ExperimentalReadiumApi::class)
+    private val _uiState = MutableStateFlow(
+        ReaderUiState(
+            preferences = EpubPreferences(
+                publisherStyles = false,
+                fontSize = syncPreferences.readerFontSize.toDouble(),
+                theme = when (syncPreferences.readerTheme) {
+                    1 -> Theme.DARK
+                    2 -> Theme.SEPIA
+                    else -> Theme.LIGHT
+                }
+            )
+        )
+    )
     val uiState: StateFlow<ReaderUiState> = _uiState.asStateFlow()
 
     init {
@@ -60,17 +77,17 @@ class ReaderViewModel(
                     val publication = bookParser.parsePublication(File(book.filePath))
                     val totalPages = publication?.findService(PositionsService::class)?.positions()?.size
                     
-                    _uiState.value = ReaderUiState(
+                    _uiState.value = _uiState.value.copy(
                         book = book,
                         publication = publication,
                         totalPages = totalPages,
                         isLoading = false
                     )
                 } else {
-                    _uiState.value = ReaderUiState(isLoading = false, error = "Book not found")
+                    _uiState.value = _uiState.value.copy(isLoading = false, error = "Book not found")
                 }
             } catch (e: Exception) {
-                _uiState.value = ReaderUiState(isLoading = false, error = e.message)
+                _uiState.value = _uiState.value.copy(isLoading = false, error = e.message)
             }
         }
     }
@@ -83,7 +100,9 @@ class ReaderViewModel(
         coverUrl = coverPath,
         filePath = filePath,
         fileType = fileType,
-        description = description,
+        description = description?.let { 
+            Html.fromHtml(it, Html.FROM_HTML_MODE_COMPACT).toString().trim()
+        },
         publisher = publisher,
         publishedDate = publishedDate,
         language = language,
@@ -122,13 +141,21 @@ class ReaderViewModel(
         _uiState.value = _uiState.value.copy(isHudVisible = !_uiState.value.isHudVisible)
     }
 
+    @OptIn(ExperimentalReadiumApi::class)
     fun updateTheme(theme: Theme) {
+        syncPreferences.readerTheme = when (theme) {
+            Theme.DARK -> 1
+            Theme.SEPIA -> 2
+            else -> 0
+        }
         _uiState.value = _uiState.value.copy(
             preferences = _uiState.value.preferences.copy(theme = theme)
         )
     }
 
+    @OptIn(ExperimentalReadiumApi::class)
     fun updateFontSize(fontSize: Double) {
+        syncPreferences.readerFontSize = fontSize.toFloat()
         _uiState.value = _uiState.value.copy(
             preferences = _uiState.value.preferences.copy(fontSize = fontSize)
         )

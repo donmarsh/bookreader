@@ -23,7 +23,8 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Brightness4
 import androidx.compose.material.icons.filled.Brightness7
 import androidx.compose.material.icons.filled.MoreVert
-import androidx.compose.material.icons.filled.TextFields
+import androidx.compose.material.icons.filled.TextDecrease
+import androidx.compose.material.icons.filled.TextIncrease
 import androidx.compose.material3.CenterAlignedTopAppBar
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
@@ -76,6 +77,7 @@ import org.readium.r2.shared.ExperimentalReadiumApi
 import org.readium.r2.shared.publication.Locator
 import org.readium.r2.shared.publication.Publication
 import org.readium.r2.shared.util.AbsoluteUrl
+import kotlin.time.Duration.Companion.milliseconds
 
 @OptIn(ExperimentalMaterial3Api::class, ExperimentalReadiumApi::class)
 @Composable
@@ -90,7 +92,7 @@ fun ReaderScreen(
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return ReaderViewModel(bookId, app.database.bookDao(), app.bookParser, app.syncRepository) as T
+                return ReaderViewModel(bookId, app.database.bookDao(), app.bookParser, app.syncRepository, app.syncPreferences) as T
             }
         }
     )
@@ -237,9 +239,12 @@ fun ReaderScreen(
                                 )
                             }
                         },
-                        colors = TopAppBarDefaults.centerAlignedTopAppBarColors(
+                        colors = TopAppBarDefaults.topAppBarColors(
                             containerColor = Color.Transparent,
-                            titleContentColor = contentColor
+                            scrolledContainerColor = Color.Unspecified,
+                            navigationIconContentColor = Color.Unspecified,
+                            titleContentColor = contentColor,
+                            actionIconContentColor = Color.Unspecified
                         )
                     )
                 }
@@ -275,29 +280,46 @@ fun ReaderScreen(
                     shadowElevation = 8.dp
                 ) {
                     Row(
-                        modifier = Modifier.fillMaxSize().padding(horizontal = 16.dp),
+                        modifier = Modifier.fillMaxSize().padding(horizontal = 8.dp),
                         verticalAlignment = Alignment.CenterVertically,
-                        horizontalArrangement = Arrangement.SpaceBetween
+                        horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
                         IconButton(onClick = {
-                            val nextSize = if ((uiState.preferences.fontSize ?: 1.0) >= 2.0) 0.5 else (uiState.preferences.fontSize ?: 1.0) + 0.2
-                            viewModel.updateFontSize(nextSize)
+                            val currentSize = uiState.preferences.fontSize ?: 1.0
+                            viewModel.updateFontSize((currentSize - 0.1).coerceAtLeast(0.5))
                         }) {
                             Icon(
-                                Icons.Default.TextFields, 
-                                contentDescription = "Font settings",
+                                Icons.Default.TextDecrease, 
+                                contentDescription = "Decrease font size",
                                 tint = contentColor
                             )
                         }
+                        
+                        IconButton(onClick = {
+                            val currentSize = uiState.preferences.fontSize ?: 1.0
+                            viewModel.updateFontSize((currentSize + 0.1).coerceAtMost(3.0))
+                        }) {
+                            Icon(
+                                Icons.Default.TextIncrease, 
+                                contentDescription = "Increase font size",
+                                tint = contentColor
+                            )
+                        }
+
                         IconButton(onClick = {
                             val nextTheme = when (uiState.preferences.theme) {
                                 Theme.DARK -> Theme.LIGHT
+                                Theme.LIGHT -> Theme.SEPIA
                                 else -> Theme.DARK
                             }
                             viewModel.updateTheme(nextTheme)
                         }) {
                             Icon(
-                                if (uiState.preferences.theme == Theme.DARK) Icons.Default.Brightness7 else Icons.Default.Brightness4,
+                                imageVector = when (uiState.preferences.theme) {
+                                    Theme.DARK -> Icons.Default.Brightness7
+                                    Theme.SEPIA -> Icons.Default.Brightness4
+                                    else -> Icons.Default.Brightness4
+                                },
                                 contentDescription = "Theme",
                                 tint = contentColor
                             )
@@ -383,7 +405,7 @@ fun ReadiumNavigator(
         // Ensure fragment is attached before accessing its properties/viewModel
         if (nav is androidx.fragment.app.Fragment) {
             while (!nav.isAdded || nav.activity == null) {
-                delay(10)
+                delay(10.milliseconds)
             }
         }
         nav.currentLocator.collectLatest { locator ->

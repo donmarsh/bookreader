@@ -1,19 +1,28 @@
 package org.marshsoft.bookreader.data.local
 
 import android.content.Context
+import androidx.core.content.edit
 
 class SyncPreferences(context: Context) {
     private val prefs = context.getSharedPreferences("sync_prefs", Context.MODE_PRIVATE)
 
     var isSyncEnabled: Boolean
         get() = prefs.getBoolean("is_sync_enabled", false)
-        set(value) = prefs.edit().putBoolean("is_sync_enabled", value).apply()
+        set(value) = prefs.edit { putBoolean("is_sync_enabled", value) }
 
     var isDriveSyncEnabled: Boolean
         get() = prefs.getBoolean("is_drive_sync_enabled", false)
-        set(value) = prefs.edit().putBoolean("is_drive_sync_enabled", value).apply()
+        set(value) = prefs.edit { putBoolean("is_drive_sync_enabled", value) }
 
     var isFirstRun: Boolean
         get() = prefs.getBoolean("is_first_run", true)
-        set(value) = prefs.edit().putBoolean("is_first_run", value).apply()
+        set(value) = prefs.edit { putBoolean("is_first_run", value) }
+
+    var readerFontSize: Float
+        get() = prefs.getFloat("reader_font_size", 1.0f)
+        set(value) = prefs.edit { putFloat("reader_font_size", value) }
+
+    var readerTheme: Int
+        get() = prefs.getInt("reader_theme", 0) // 0: Light, 1: Dark, 2: Sepia
+        set(value) = prefs.edit { putInt("reader_theme", value) }
 }

@@ -8,7 +8,9 @@ import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.RoundedCornerShape
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
@@ -53,8 +55,7 @@ fun LibraryScreen(
                     app.database.bookDao(), 
                     app.bookParser, 
                     app.syncRepository,
-                    app.syncPreferences,
-                    app.authRepository
+                    app.syncPreferences
                 ) as T
             }
         }
@@ -67,8 +68,7 @@ fun LibraryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.syncStatus) {
-        val status = uiState.syncStatus
-        when (status) {
+        when (val status = uiState.syncStatus) {
             is SyncRepository.SyncStatus.Success -> {
                 snackbarHostState.showSnackbar("Library sync completed successfully")
             }
@@ -83,6 +83,7 @@ fun LibraryScreen(
     var showImportMenu by remember { mutableStateOf(false) }
     var showFolderTypeDialog by remember { mutableStateOf(false) }
     var pendingFolderUri by remember { mutableStateOf<android.net.Uri?>(null) }
+    var fullDescriptionToShow by remember { mutableStateOf<String?>(null) }
     
     val currentReading = if (searchQuery.isEmpty()) books.firstOrNull() else null
 
@@ -128,6 +129,13 @@ fun LibraryScreen(
             onSyncClick = { viewModel.syncLibrary(context) },
             isUserLoggedIn = currentUser != null,
             syncStatus = uiState.syncStatus
+        )
+    }
+
+    if (fullDescriptionToShow != null) {
+        FullDescriptionDialog(
+            description = fullDescriptionToShow!!,
+            onDismiss = { fullDescriptionToShow = null }
         )
     }
 
@@ -261,7 +269,8 @@ fun LibraryScreen(
                                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f)
                             ),
                             maxLines = 3,
-                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                            modifier = Modifier.clickable { fullDescriptionToShow = it }
                         )
                         Spacer(modifier = Modifier.height(24.dp))
                     }
@@ -363,6 +372,40 @@ fun LibraryScreen(
             }
         }
     }
+}
+
+@Composable
+fun FullDescriptionDialog(
+    description: String,
+    onDismiss: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { 
+            Text(
+                "Description", 
+                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+            ) 
+        },
+        text = {
+            Column(modifier = Modifier.verticalScroll(rememberScrollState())) {
+                Text(
+                    text = description,
+                    style = MaterialTheme.typography.bodyMedium.copy(
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.8f),
+                        lineHeight = 24.sp
+                    )
+                )
+            }
+        },
+        confirmButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Close")
+            }
+        },
+        containerColor = Color(0xFFFCF9F4), // Match DESIGN.md surface
+        shape = RoundedCornerShape(12.dp)
+    )
 }
 
 @Composable
