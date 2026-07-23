@@ -6,7 +6,6 @@ import androidx.navigation.NavHostController
 import androidx.navigation.compose.NavHost
 import androidx.navigation.compose.composable
 import org.marshsoft.bookreader.ui.screens.library.LibraryScreen
-import org.marshsoft.bookreader.ui.screens.login.ForgotPasswordScreen
 import org.marshsoft.bookreader.ui.screens.login.LoginScreen
 import org.marshsoft.bookreader.ui.screens.reader.ReaderScreen
 import org.marshsoft.bookreader.ui.screens.settings.SettingsScreen
@@ -16,8 +15,9 @@ import org.marshsoft.bookreader.ui.screens.signup.SignUpScreen
 fun NavGraph(
     navController: NavHostController,
     onMenuClick: () -> Unit,
+    modifier: Modifier = Modifier,
     startDestination: String = Screen.Library.route,
-    modifier: Modifier = Modifier
+
 ) {
     NavHost(
         navController = navController,
@@ -29,16 +29,8 @@ fun NavGraph(
                 onGoogleSignInClick = { navController.navigate(Screen.Library.route) }
             )
         }
-        composable(Screen.ForgotPassword.route) {
-            ForgotPasswordScreen(
-                onSendLinkClick = { /* TODO: Implement email sending logic */ },
-                onBackClick = { navController.popBackStack() }
-            )
-        }
         composable(Screen.SignUp.route) {
             SignUpScreen(
-                onSignUpClick = { navController.navigate(Screen.Library.route) },
-                onSignInClick = { navController.navigate(Screen.Login.route) },
                 onCloseClick = { navController.popBackStack() },
                 onGoogleSignUpClick = { navController.navigate(Screen.Library.route) }
             )

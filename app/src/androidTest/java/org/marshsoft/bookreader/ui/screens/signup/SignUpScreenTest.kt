@@ -17,8 +17,6 @@ class SignUpScreenTest {
         composeTestRule.setContent {
             BookReaderTheme {
                 SignUpScreen(
-                    onSignUpClick = {},
-                    onSignInClick = {},
                     onCloseClick = {},
                     onGoogleSignUpClick = {}
                 )
@@ -26,6 +24,6 @@ class SignUpScreenTest {
         }
 
         composeTestRule.onNodeWithText("Join the Sanctuary").assertIsDisplayed()
-        composeTestRule.onNodeWithText("Begin Your Journey").assertIsDisplayed()
+        composeTestRule.onNodeWithText("Sign up with Google").assertIsDisplayed()
     }
 }

@@ -19,7 +19,6 @@ import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.marshsoft.bookreader.BookReaderApplication
-import org.marshsoft.bookreader.ui.theme.ManropeFamily
 
 @Composable
 fun LoginScreen(
@@ -96,7 +95,7 @@ fun LoginScreen(
             )
             Spacer(modifier = Modifier.height(8.dp))
             Text(
-                text = if (currentUser != null) "YOU ARE CURRENTLY SIGNED IN. WOULD YOU LIKE TO CONTINUE TO THE LIBRARY?" else "PLEASE ENTER YOUR CREDENTIALS TO ACCESS THE LIBRARY",
+                text = if (currentUser != null) "YOU ARE CURRENTLY SIGNED IN. WOULD YOU LIKE TO CONTINUE TO THE LIBRARY?" else "PLEASE SIGN IN WITH YOUR GOOGLE ACCOUNT TO ACCESS THE LIBRARY",
                 style = MaterialTheme.typography.labelMedium.copy(
                     color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f),
                     letterSpacing = 1.sp

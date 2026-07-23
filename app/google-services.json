@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "993966114933-99t1e1pp4mif6u56miii25a8g28phuci.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "org.marshsoft.bookreader",
+            "certificate_hash": "4587cbf5b57c1f52bb8017c7efacef45ead483da"
+          }
+        },
+        {
           "client_id": "993966114933-aosd7lp6iudn0adg82kvs0j720v5r5n6.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
