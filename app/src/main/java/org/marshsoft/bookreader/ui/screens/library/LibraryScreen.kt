@@ -71,9 +71,11 @@ fun LibraryScreen(
         when (val status = uiState.syncStatus) {
             is SyncRepository.SyncStatus.Success -> {
                 snackbarHostState.showSnackbar("Library sync completed successfully")
+                viewModel.clearSyncStatus()
             }
             is SyncRepository.SyncStatus.Error -> {
                 snackbarHostState.showSnackbar(status.message)
+                viewModel.clearSyncStatus()
             }
             else -> {}
         }
@@ -136,6 +138,17 @@ fun LibraryScreen(
         FullDescriptionDialog(
             description = fullDescriptionToShow!!,
             onDismiss = { fullDescriptionToShow = null }
+        )
+    }
+
+    if (uiState.bookToDelete != null) {
+        DeleteBookDialog(
+            book = uiState.bookToDelete!!,
+            isSyncEnabled = app.syncPreferences.isSyncEnabled,
+            onDismiss = { viewModel.cancelDeleteBook() },
+            onConfirm = { removeFromCloud ->
+                viewModel.deleteBook(uiState.bookToDelete!!, removeFromCloud, context)
+            }
         )
     }
 
@@ -323,7 +336,7 @@ fun LibraryScreen(
                         }
 
                         OutlinedButton(
-                            onClick = { viewModel.deleteBook(currentReading) },
+                            onClick = { viewModel.confirmDeleteBook(currentReading) },
                             modifier = Modifier
                                 .height(56.dp),
                             shape = RoundedCornerShape(8.dp),
@@ -362,7 +375,7 @@ fun LibraryScreen(
                 BookItem(
                     book = book,
                     onClick = { onBookClick(book.id) },
-                    onDeleteClick = { viewModel.deleteBook(book) }
+                    onDeleteClick = { viewModel.confirmDeleteBook(book) }
                 )
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -372,6 +385,53 @@ fun LibraryScreen(
             }
         }
     }
+}
+
+@Composable
+fun DeleteBookDialog(
+    book: Book,
+    isSyncEnabled: Boolean,
+    onDismiss: () -> Unit,
+    onConfirm: (Boolean) -> Unit
+) {
+    var removeFromCloud by remember { mutableStateOf(false) }
+
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Delete Book") },
+        text = {
+            Column {
+                Text("Are you sure you want to delete \"${book.title}\"?")
+                if (isSyncEnabled) {
+                    Spacer(modifier = Modifier.height(16.dp))
+                    Row(
+                        verticalAlignment = Alignment.CenterVertically,
+                        modifier = Modifier.clickable { removeFromCloud = !removeFromCloud }
+                    ) {
+                        Checkbox(
+                            checked = removeFromCloud,
+                            onCheckedChange = { removeFromCloud = it }
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("Also remove from Google Drive and Cloud sync", style = MaterialTheme.typography.bodyMedium)
+                    }
+                }
+            }
+        },
+        confirmButton = {
+            Button(
+                onClick = { onConfirm(removeFromCloud) },
+                colors = ButtonDefaults.buttonColors(containerColor = MaterialTheme.colorScheme.error)
+            ) {
+                Text("Delete", color = Color.White)
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

@@ -24,7 +24,8 @@ import java.io.File
 data class LibraryUiState(
     val message: String? = null,
     val showFirstRunPrompt: Boolean = false,
-    val syncStatus: SyncRepository.SyncStatus = SyncRepository.SyncStatus.Idle
+    val syncStatus: SyncRepository.SyncStatus = SyncRepository.SyncStatus.Idle,
+    val bookToDelete: Book? = null
 )
 
 class LibraryViewModel(
@@ -71,6 +72,10 @@ class LibraryViewModel(
 
     fun syncLibrary(context: android.content.Context) {
         viewModelScope.launch {
+            // Automatically enable sync settings when user confirms first-run sync
+            syncPreferences.isSyncEnabled = true
+            syncPreferences.isDriveSyncEnabled = true
+            
             syncRepository.syncAll(context).collect { status ->
                 _uiState.value = _uiState.value.copy(syncStatus = status)
                 
@@ -80,6 +85,10 @@ class LibraryViewModel(
                 }
             }
         }
+    }
+
+    fun clearSyncStatus() {
+        _uiState.value = _uiState.value.copy(syncStatus = SyncRepository.SyncStatus.Idle)
     }
 
     fun importBook(context: android.content.Context, uri: Uri) {
@@ -251,21 +260,39 @@ class LibraryViewModel(
         _uiState.value = _uiState.value.copy(message = null)
     }
 
-    fun deleteBook(book: Book) {
+    fun deleteBook(book: Book, removeFromCloud: Boolean = false, context: android.content.Context? = null) {
         viewModelScope.launch {
             try {
-                // Delete from database only, preserving the actual files
                 val idLong = book.id.toLongOrNull()
                 if (idLong != null) {
                     val entity = bookDao.getBookById(idLong)
                     if (entity != null) {
+                        // Delete from remote if requested and sync is on
+                        if (removeFromCloud && syncPreferences.isSyncEnabled) {
+                            syncRepository.deleteRemoteBook(entity, true, context)
+                        }
+                        
                         bookDao.deleteBook(entity)
+                        
+                        // Delete local files
+                        File(entity.filePath).delete()
+                        entity.coverPath?.let { File(it).delete() }
                     }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
+            } finally {
+                _uiState.value = _uiState.value.copy(bookToDelete = null)
             }
         }
+    }
+
+    fun confirmDeleteBook(book: Book) {
+        _uiState.value = _uiState.value.copy(bookToDelete = book)
+    }
+
+    fun cancelDeleteBook() {
+        _uiState.value = _uiState.value.copy(bookToDelete = null)
     }
 
     fun onSearchQueryChange(query: String) {

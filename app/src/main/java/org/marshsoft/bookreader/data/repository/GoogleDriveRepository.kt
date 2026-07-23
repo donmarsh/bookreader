@@ -95,4 +95,16 @@ class GoogleDriveRepository {
             null
         }
     }
+
+    suspend fun deleteFile(accessToken: String, identifier: String): Boolean = withContext(Dispatchers.IO) {
+        try {
+            val service = getDriveService(accessToken)
+            val fileId = findFileId(accessToken, identifier) ?: return@withContext true // Already gone
+            service.files().delete(fileId).execute()
+            true
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
 }
