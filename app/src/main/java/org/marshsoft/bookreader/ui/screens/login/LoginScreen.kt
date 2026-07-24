@@ -1,5 +1,8 @@
 package org.marshsoft.bookreader.ui.screens.login
 
+import android.app.Activity
+import androidx.activity.compose.rememberLauncherForActivityResult
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -11,12 +14,11 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Brush
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
-import androidx.lifecycle.ViewModel
-import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import org.marshsoft.bookreader.BookReaderApplication
 
@@ -24,20 +26,24 @@ import org.marshsoft.bookreader.BookReaderApplication
 fun LoginScreen(
     onGoogleSignInClick: () -> Unit
 ) {
-    val context = androidx.compose.ui.platform.LocalContext.current
+    val context = LocalContext.current
     val app = context.applicationContext as BookReaderApplication
     val viewModel: LoginViewModel = viewModel(
-        factory = object : ViewModelProvider.Factory {
-            override fun <T : ViewModel> create(modelClass: Class<T>): T {
-                @Suppress("UNCHECKED_CAST")
-                return LoginViewModel(app.authRepository) as T
-            }
-        }
+        factory = LoginViewModelFactory(app.authRepository)
     )
 
     val isLoading by viewModel.isLoading.collectAsState()
     val error by viewModel.error.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
+
+    // Legacy sign-in launcher
+    val legacySignInLauncher = rememberLauncherForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        if (result.resultCode == Activity.RESULT_OK) {
+            viewModel.handleLegacySignInResult(result.data, onGoogleSignInClick)
+        }
+    }
 
     Surface(
         modifier = Modifier.fillMaxSize(),
@@ -50,7 +56,7 @@ fun LoginScreen(
             horizontalAlignment = Alignment.CenterHorizontally
         ) {
             Spacer(modifier = Modifier.height(40.dp))
-            
+
             // Logo and Title
             Row(
                 verticalAlignment = Alignment.CenterVertically,
@@ -148,11 +154,11 @@ fun LoginScreen(
                         }
                     }
                 }
-                
+
                 Spacer(modifier = Modifier.height(24.dp))
-                
+
                 Button(
-                    onClick = onGoogleSignInClick, // Reusing the success callback to navigate to Library
+                    onClick = onGoogleSignInClick,
                     modifier = Modifier
                         .fillMaxWidth()
                         .height(56.dp),
@@ -177,7 +183,16 @@ fun LoginScreen(
             } else {
                 // Google Sign In Button
                 OutlinedButton(
-                    onClick = { viewModel.signInWithGoogle(context, onGoogleSignInClick) },
+                    onClick = {
+                        viewModel.signInWithGoogle(
+                            context = context,
+                            onSuccess = onGoogleSignInClick,
+                            onLegacySignInRequired = {
+                                // Launch legacy Google Sign-In
+                                legacySignInLauncher.launch(app.authRepository.getLegacySignInIntent())
+                            }
+                        )
+                    },
                     enabled = !isLoading,
                     modifier = Modifier
                         .fillMaxWidth()
@@ -200,7 +215,6 @@ fun LoginScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.Center
                     ) {
-                        // Placeholder for Google G logo
                         Box(
                             modifier = Modifier
                                 .size(20.dp)
@@ -233,7 +247,7 @@ fun LoginScreen(
             }
 
             Spacer(modifier = Modifier.weight(1f))
-            
+
             Text(
                 text = "© 2024 THE BOOK SANCTUARY. ESTABLISHED FOR THE MIND.",
                 style = MaterialTheme.typography.labelSmall,

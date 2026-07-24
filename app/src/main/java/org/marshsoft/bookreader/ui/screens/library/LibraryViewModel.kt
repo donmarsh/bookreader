@@ -16,6 +16,7 @@ import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
 import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.repository.SyncRepository
+import org.marshsoft.bookreader.data.repository.AuthRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
 import androidx.documentfile.provider.DocumentFile
@@ -32,7 +33,8 @@ class LibraryViewModel(
     private val bookDao: BookDao,
     private val bookParser: BookParser,
     private val syncRepository: SyncRepository,
-    private val syncPreferences: SyncPreferences
+    private val syncPreferences: SyncPreferences,
+    private val authRepository: AuthRepository
 ) : ViewModel() {
 
     private val _books = MutableStateFlow<List<Book>>(emptyList())
@@ -60,8 +62,22 @@ class LibraryViewModel(
             }
         }
 
-        if (syncPreferences.isFirstRun) {
+        if (syncPreferences.isFirstRun && authRepository.currentUser.value == null) {
             _uiState.value = _uiState.value.copy(showFirstRunPrompt = true)
+        }
+
+        viewModelScope.launch {
+            authRepository.currentUser.collect { user ->
+                if (user != null && _uiState.value.showFirstRunPrompt) {
+                    // If user signs in, we can either transition to Sync or hide it.
+                    // Given the user's feedback, it's better to dismiss it if they just signed in
+                    // or at least ensure it's not asking to "Sign In" anymore.
+                    // If we want to support auto-sync on first login:
+                    if (syncPreferences.isFirstRun) {
+                        dismissFirstRunPrompt()
+                    }
+                }
+            }
         }
     }
 
@@ -267,8 +283,8 @@ class LibraryViewModel(
                 if (idLong != null) {
                     val entity = bookDao.getBookById(idLong)
                     if (entity != null) {
-                        // Delete from remote if requested and sync is on
-                        if (removeFromCloud && syncPreferences.isSyncEnabled) {
+                        // Delete from remote if requested
+                        if (removeFromCloud) {
                             syncRepository.deleteRemoteBook(entity, true, context)
                         }
                         

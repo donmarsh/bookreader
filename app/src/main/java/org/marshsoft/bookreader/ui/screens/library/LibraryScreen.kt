@@ -55,7 +55,8 @@ fun LibraryScreen(
                     app.database.bookDao(), 
                     app.bookParser, 
                     app.syncRepository,
-                    app.syncPreferences
+                    app.syncPreferences,
+                    app.authRepository
                 ) as T
             }
         }
@@ -64,6 +65,7 @@ fun LibraryScreen(
     val books by viewModel.books.collectAsState()
     val searchQuery by viewModel.searchQuery.collectAsState()
     val uiState by viewModel.uiState.collectAsState()
+    val currentUser by app.authRepository.currentUser.collectAsState()
     
     val snackbarHostState = remember { SnackbarHostState() }
 
@@ -124,7 +126,6 @@ fun LibraryScreen(
     }
 
     if (uiState.showFirstRunPrompt) {
-        val currentUser by app.authRepository.currentUser.collectAsState()
         FirstRunSyncDialog(
             onDismiss = { viewModel.dismissFirstRunPrompt() },
             onSignInClick = onLoginClick,
@@ -144,7 +145,7 @@ fun LibraryScreen(
     if (uiState.bookToDelete != null) {
         DeleteBookDialog(
             book = uiState.bookToDelete!!,
-            isSyncEnabled = app.syncPreferences.isSyncEnabled,
+            isUserLoggedIn = currentUser != null,
             onDismiss = { viewModel.cancelDeleteBook() },
             onConfirm = { removeFromCloud ->
                 viewModel.deleteBook(uiState.bookToDelete!!, removeFromCloud, context)
@@ -390,7 +391,7 @@ fun LibraryScreen(
 @Composable
 fun DeleteBookDialog(
     book: Book,
-    isSyncEnabled: Boolean,
+    isUserLoggedIn: Boolean,
     onDismiss: () -> Unit,
     onConfirm: (Boolean) -> Unit
 ) {
@@ -402,7 +403,7 @@ fun DeleteBookDialog(
         text = {
             Column {
                 Text("Are you sure you want to delete \"${book.title}\"?")
-                if (isSyncEnabled) {
+                if (isUserLoggedIn) {
                     Spacer(modifier = Modifier.height(16.dp))
                     Row(
                         verticalAlignment = Alignment.CenterVertically,

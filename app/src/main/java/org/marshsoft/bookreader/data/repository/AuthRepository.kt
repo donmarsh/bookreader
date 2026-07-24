@@ -1,13 +1,19 @@
 package org.marshsoft.bookreader.data.repository
 
+import android.app.Activity
 import android.content.Context
+import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
+import com.google.android.gms.common.ConnectionResult
+import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.Scopes
+import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
@@ -59,13 +65,44 @@ class AuthRepository(private val appContext: Context) {
         }
     }
 
+    // ===== LEGACY FALLBACK =====
+    private val legacySignInClient by lazy {
+        val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
+            com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
+        )
+            .requestIdToken("993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com")
+            .requestEmail()
+            .build()
+        com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(appContext, gso)
+    }
+
+    fun getLegacySignInIntent() = legacySignInClient.signInIntent
+
+    suspend fun handleLegacySignInResult(data: android.content.Intent?): Result<User> {
+        return try {
+            val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data)
+            val account = task.getResult(ApiException::class.java)
+            val idToken = account?.idToken ?: throw Exception("No ID token")
+            val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = auth.signInWithCredential(firebaseCredential).await()
+            val user = authResult.user?.toDomain() ?: throw Exception("Sign in failed")
+            Result.success(user)
+        } catch (e: Exception) {
+            Log.e("Auth", "Legacy sign-in failed", e)
+            Result.failure(e)
+        }
+    }
+    // ===========================
+
     suspend fun signInWithGoogle(activity: Context): Result<User> {
         return try {
+            // Try Credential Manager first
             val webClientId = "993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com"
-            
+
             val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(filterByAuthorizedAccounts = false)
+                .setFilterByAuthorizedAccounts(false)
                 .setServerClientId(webClientId)
+                .setAutoSelectEnabled(false) // Force account picker
                 .build()
 
             val request = GetCredentialRequest.Builder()
@@ -91,14 +128,31 @@ class AuthRepository(private val appContext: Context) {
             } else {
                 Result.failure(Exception("Unsupported credential type: ${credential::class.java.name}"))
             }
+        } catch (e: GetCredentialException) {
+            Log.w("Auth", "Credential Manager failed, falling back to legacy", e)
+            // Return a special failure that tells the UI to use legacy sign-in
+            Result.failure(LegacySignInRequiredException())
         } catch (e: Exception) {
+            Log.e("Auth", "type=${e.localizedMessage} message=${e.message}", e)
             Result.failure(e)
         }
     }
 
+    // Exception to signal UI to use legacy flow
+    class LegacySignInRequiredException : Exception("Use legacy Google Sign-In")
+
     suspend fun signOut() {
         auth.signOut()
-        credentialManager.clearCredentialState(ClearCredentialStateRequest())
+        try {
+            credentialManager.clearCredentialState(ClearCredentialStateRequest())
+        } catch (e: Exception) {
+            Log.w("Auth", "Failed to clear credential state", e)
+        }
+        try {
+            legacySignInClient.signOut().await()
+        } catch (e: Exception) {
+            Log.w("Auth", "Failed to sign out legacy client", e)
+        }
     }
 
     private fun com.google.firebase.auth.FirebaseUser.toDomain() = User(
@@ -107,6 +161,4 @@ class AuthRepository(private val appContext: Context) {
         displayName = displayName,
         photoUrl = photoUrl?.toString(),
     )
-
-    // TODO: Implement Google Drive Authorization for file backup
 }

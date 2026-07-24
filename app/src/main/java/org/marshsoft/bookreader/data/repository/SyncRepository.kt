@@ -176,7 +176,7 @@ class SyncRepository(
         }
 
         // 2. Optionally delete from Google Drive
-        if (deleteFromDrive && syncPreferences.isDriveSyncEnabled) {
+        if (deleteFromDrive) {
             try {
                 val accessToken = authRepository.getAccessToken(activityContext ?: context)
                 if (accessToken != null) {

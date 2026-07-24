@@ -1,5 +1,6 @@
 package org.marshsoft.bookreader.ui.screens.login
 
+import android.content.Intent
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.viewModelScope
 import kotlinx.coroutines.flow.MutableStateFlow
@@ -20,13 +21,39 @@ class LoginViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    fun signInWithGoogle(context: android.content.Context, onSuccess: () -> Unit) {
+    fun signInWithGoogle(
+        context: android.content.Context,
+        onSuccess: () -> Unit,
+        onLegacySignInRequired: () -> Unit
+    ) {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
             val result = authRepository.signInWithGoogle(context)
             _isLoading.value = false
-            
+
+            result.onSuccess {
+                onSuccess()
+            }.onFailure { e ->
+                if (e is AuthRepository.LegacySignInRequiredException) {
+                    onLegacySignInRequired()
+                } else {
+                    _error.value = e.message ?: "Sign in failed"
+                }
+            }
+        }
+    }
+
+    fun handleLegacySignInResult(
+        data: Intent?,
+        onSuccess: () -> Unit
+    ) {
+        viewModelScope.launch {
+            _isLoading.value = true
+            _error.value = null
+            val result = authRepository.handleLegacySignInResult(data)
+            _isLoading.value = false
+
             result.onSuccess {
                 onSuccess()
             }.onFailure { e ->
