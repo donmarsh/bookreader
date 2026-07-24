@@ -18,8 +18,8 @@ android {
         applicationId = "org.marshsoft.bookreader"
         minSdk = 29
         targetSdk = 37
-        versionCode = 4
-        versionName = "1.4"
+        versionCode = 6
+        versionName = "1.6"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }

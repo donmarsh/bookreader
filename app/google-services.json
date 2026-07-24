@@ -30,6 +30,14 @@
           }
         },
         {
+          "client_id": "993966114933-tjk514bpq4dpkaulngvq1veap1ouklt1.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "org.marshsoft.bookreader",
+            "certificate_hash": "c86dc6acbcc5e9c508a686e379f9cf1c2402e827"
+          }
+        },
+        {
           "client_id": "993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com",
           "client_type": 3
         }
