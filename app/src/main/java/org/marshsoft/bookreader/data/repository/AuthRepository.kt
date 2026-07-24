@@ -2,21 +2,23 @@ package org.marshsoft.bookreader.data.repository
 
 import android.app.Activity
 import android.content.Context
+import android.content.ContextWrapper
 import android.util.Log
 import androidx.credentials.ClearCredentialStateRequest
 import androidx.credentials.CredentialManager
 import androidx.credentials.CustomCredential
 import androidx.credentials.GetCredentialRequest
 import androidx.credentials.exceptions.GetCredentialException
+import androidx.credentials.exceptions.NoCredentialException
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
-import com.google.android.gms.common.ConnectionResult
-import com.google.android.gms.common.GoogleApiAvailability
 import com.google.android.gms.common.Scopes
 import com.google.android.gms.common.api.ApiException
 import com.google.android.gms.common.api.Scope
 import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GetSignInWithGoogleOption
 import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.google.firebase.Firebase
 import com.google.firebase.auth.FirebaseAuth
 import com.google.firebase.auth.GoogleAuthProvider
@@ -25,8 +27,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.tasks.await
 import org.marshsoft.bookreader.domain.model.User
+import java.security.SecureRandom
 
 class AuthRepository(private val appContext: Context) {
+    companion object {
+        private const val WEB_CLIENT_ID = "993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com"
+        private const val TAG = "Auth"
+    }
+
     private val auth: FirebaseAuth = Firebase.auth
     private val credentialManager = CredentialManager.create(appContext)
 
@@ -70,7 +78,7 @@ class AuthRepository(private val appContext: Context) {
         val gso = com.google.android.gms.auth.api.signin.GoogleSignInOptions.Builder(
             com.google.android.gms.auth.api.signin.GoogleSignInOptions.DEFAULT_SIGN_IN
         )
-            .requestIdToken("993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com")
+            .requestIdToken(WEB_CLIENT_ID)
             .requestEmail()
             .build()
         com.google.android.gms.auth.api.signin.GoogleSignIn.getClient(appContext, gso)
@@ -94,24 +102,68 @@ class AuthRepository(private val appContext: Context) {
     }
     // ===========================
 
-    suspend fun signInWithGoogle(activity: Context): Result<User> {
-        return try {
-            // Try Credential Manager first
-            val webClientId = "993966114933-u4e9ra4vmamc639jufjli5q3k2qlkq7l.apps.googleusercontent.com"
+    suspend fun signInWithGoogle(context: Context): Result<User> {
+        val activity = context.findActivity() ?: return Result.failure(Exception("Activity context required for Credential Manager"))
+        val nonce = generateSecureRandomNonce()
 
-            val googleIdOption = GetGoogleIdOption.Builder()
-                .setFilterByAuthorizedAccounts(false)
-                .setServerClientId(webClientId)
-                .setAutoSelectEnabled(false) // Force account picker
+        return try {
+            // 1. Try with authorized accounts first (FilterByAuthorizedAccounts = true)
+            // This is the cleanest UX for returning users (One Tap)
+            val authorizedOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(true)
+                .setServerClientId(WEB_CLIENT_ID)
+                .setAutoSelectEnabled(true)
+                .setNonce(nonce)
                 .build()
 
             val request = GetCredentialRequest.Builder()
-                .addCredentialOption(googleIdOption)
+                .addCredentialOption(authorizedOption)
                 .build()
 
-            val result = credentialManager.getCredential(activity, request)
-            val credential = result.credential
+            try {
+                val result = credentialManager.getCredential(activity, request)
+                return handleCredential(result.credential)
+            } catch (e: NoCredentialException) {
+                Log.d(TAG, "No authorized credentials found, trying account selector: ${e.message}")
+            } catch (e: GetCredentialException) {
+                // If it's a cancellation or other error, we might still want to try the selector
+                // unless it was an explicit user cancellation that should stop the flow.
+                Log.d(TAG, "First attempt failed: ${e.message}")
+            }
 
+            // 2. Try with account selector if no authorized ones found
+            // We use GetSignInWithGoogleOption as it's specifically designed for the "Sign in with Google" button flow
+            val signInOption = GetSignInWithGoogleOption.Builder(WEB_CLIENT_ID)
+                .setNonce(nonce)
+                .build()
+
+            // Also include GetGoogleIdOption with filter=false as an alternative
+            val allAccountsOption = GetGoogleIdOption.Builder()
+                .setFilterByAuthorizedAccounts(false)
+                .setServerClientId(WEB_CLIENT_ID)
+                .setAutoSelectEnabled(false)
+                .setNonce(nonce)
+                .build()
+
+            val secondRequest = GetCredentialRequest.Builder()
+                .addCredentialOption(signInOption)
+                .addCredentialOption(allAccountsOption)
+                .build()
+
+            val secondResult = credentialManager.getCredential(activity, secondRequest)
+            return handleCredential(secondResult.credential)
+
+        } catch (e: GetCredentialException) {
+            Log.w(TAG, "Credential Manager failed: ${e.message}", e)
+            Result.failure(LegacySignInRequiredException())
+        } catch (e: Exception) {
+            Log.e(TAG, "Sign in error: ${e.localizedMessage}", e)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun handleCredential(credential: androidx.credentials.Credential): Result<User> {
+        return try {
             val googleIdTokenCredential = when {
                 credential is GoogleIdTokenCredential -> credential
                 credential is CustomCredential && credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL -> {
@@ -128,14 +180,28 @@ class AuthRepository(private val appContext: Context) {
             } else {
                 Result.failure(Exception("Unsupported credential type: ${credential::class.java.name}"))
             }
-        } catch (e: GetCredentialException) {
-            Log.w("Auth", "Credential Manager failed, falling back to legacy", e)
-            // Return a special failure that tells the UI to use legacy sign-in
-            Result.failure(LegacySignInRequiredException())
+        } catch (e: GoogleIdTokenParsingException) {
+            Log.e(TAG, "Failed to parse Google ID token", e)
+            Result.failure(e)
         } catch (e: Exception) {
-            Log.e("Auth", "type=${e.localizedMessage} message=${e.message}", e)
+            Log.e(TAG, "Error handling credential", e)
             Result.failure(e)
         }
+    }
+
+    private fun Context.findActivity(): Activity? {
+        var context = this
+        while (context is ContextWrapper) {
+            if (context is Activity) return context
+            context = context.baseContext
+        }
+        return null
+    }
+
+    private fun generateSecureRandomNonce(byteLength: Int = 32): String {
+        val randomBytes = ByteArray(byteLength)
+        SecureRandom().nextBytes(randomBytes)
+        return android.util.Base64.encodeToString(randomBytes, android.util.Base64.NO_WRAP or android.util.Base64.URL_SAFE or android.util.Base64.NO_PADDING)
     }
 
     // Exception to signal UI to use legacy flow
