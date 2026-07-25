@@ -1,8 +1,11 @@
 package org.marshsoft.bookreader.ui.screens.login
 
 import android.app.Activity
+import android.util.Log
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
+import com.google.android.gms.common.api.ApiException
+import com.google.android.gms.auth.api.signin.GoogleSignInStatusCodes
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.*
 import androidx.compose.foundation.shape.RoundedCornerShape
@@ -43,16 +46,34 @@ fun LoginScreen(
         if (result.resultCode == Activity.RESULT_OK) {
             viewModel.handleSignInResult(result.data, onGoogleSignInClick)
         } else {
-            // Log non-OK results (e.g., user cancellation or developer error)
-            val resultStatus = when (result.resultCode) {
-                Activity.RESULT_CANCELED -> "CANCELED"
-                else -> "ERROR (${result.resultCode})"
+            // Attempt to get the Google Sign-In status code for more details
+            val intent = result.data
+            val gmsStatusCode = if (intent != null) {
+                try {
+                    val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(intent)
+                    val exception = task.exception
+                    if (exception is ApiException) {
+                        "${exception.statusCode} (${GoogleSignInStatusCodes.getStatusCodeString(exception.statusCode)})"
+                    } else {
+                        "Unknown (${result.resultCode})"
+                    }
+                } catch (_: Exception) {
+                    "Parse Error (${result.resultCode})"
+                }
+            } else {
+                "Null Data (${result.resultCode})"
             }
-            android.util.Log.w("LoginScreen", "Google sign-in result: $resultStatus")
+
+            Log.w("LoginScreen", "Google sign-in failure: $gmsStatusCode")
             
-            // Optionally notify the user via ViewModel if it wasn't an explicit cancellation
-            if (result.resultCode != Activity.RESULT_CANCELED) {
-                viewModel.onSignInError("Sign-in failed with code: ${result.resultCode}")
+            // Only show error message if it wasn't a user cancellation
+            val isCancellation = intent != null && try {
+                val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(intent)
+                (task.exception as? ApiException)?.statusCode == GoogleSignInStatusCodes.SIGN_IN_CANCELLED
+            } catch (_: Exception) { false }
+
+            if (!isCancellation && result.resultCode != Activity.RESULT_CANCELED) {
+                viewModel.onSignInError("Sign-in failed: $gmsStatusCode")
             }
         }
     }
@@ -196,7 +217,18 @@ fun LoginScreen(
                 // Google Sign In Button
                 OutlinedButton(
                     onClick = {
-                        googleSignInLauncher.launch(app.authRepository.getSignInIntent())
+                        val activity = context as? Activity
+                        if (activity != null) {
+                            viewModel.signInWithCredentialManager(
+                                activity = activity,
+                                onSuccess = onGoogleSignInClick,
+                                onFallback = {
+                                    googleSignInLauncher.launch(app.authRepository.getSignInIntent())
+                                }
+                            )
+                        } else {
+                            googleSignInLauncher.launch(app.authRepository.getSignInIntent())
+                        }
                     },
                     enabled = !isLoading,
                     modifier = Modifier

@@ -69,12 +69,10 @@ class LibraryViewModel(
         viewModelScope.launch {
             authRepository.currentUser.collect { user ->
                 if (user != null && _uiState.value.showFirstRunPrompt) {
-                    // If user signs in, we can either transition to Sync or hide it.
-                    // Given the user's feedback, it's better to dismiss it if they just signed in
-                    // or at least ensure it's not asking to "Sign In" anymore.
-                    // If we want to support auto-sync on first login:
+                    // User signed in while the "Sign in to sync" prompt was active.
+                    // Automatically enable and start sync as requested.
                     if (syncPreferences.isFirstRun) {
-                        dismissFirstRunPrompt()
+                        syncLibrary()
                     }
                 }
             }
@@ -86,7 +84,7 @@ class LibraryViewModel(
         _uiState.value = _uiState.value.copy(showFirstRunPrompt = false)
     }
 
-    fun syncLibrary(context: android.content.Context) {
+    fun syncLibrary(context: android.content.Context? = null) {
         viewModelScope.launch {
             // Automatically enable sync settings when user confirms first-run sync
             syncPreferences.isSyncEnabled = true

@@ -1,6 +1,7 @@
 package org.marshsoft.bookreader
 
 import android.app.Application
+import com.google.firebase.FirebaseApp
 import androidx.room.Room
 import androidx.work.*
 import org.marshsoft.bookreader.data.local.BookDatabase
@@ -24,6 +25,9 @@ class BookReaderApplication : Application() {
     override fun onCreate() {
         super.onCreate()
         
+        // Explicitly initialize Firebase before any repositories are created
+        FirebaseApp.initializeApp(this)
+        
         // Initialize ProviderInstaller to ensure security provider is up to date
         // and avoid issues with GMS API calls.
         ProviderInstaller.installIfNeededAsync(this, object : ProviderInstaller.ProviderInstallListener {
@@ -45,7 +49,7 @@ class BookReaderApplication : Application() {
         authRepository = AuthRepository(this)
         syncPreferences = SyncPreferences(this)
         googleDriveRepository = GoogleDriveRepository()
-        syncRepository = SyncRepository(this, database.bookDao(), authRepository, syncPreferences, googleDriveRepository)
+        syncRepository = SyncRepository(this, database.bookDao(), authRepository, syncPreferences, googleDriveRepository, bookParser)
         
         scheduleSync()
     }

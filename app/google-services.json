@@ -14,6 +14,14 @@
       },
       "oauth_client": [
         {
+          "client_id": "993966114933-6eksfd7booqd5ag590t60msc5cfnt9b5.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "org.marshsoft.bookreader",
+            "certificate_hash": "6411f886544e015918593a16e4ed5f62ae4b18d0"
+          }
+        },
+        {
           "client_id": "993966114933-99t1e1pp4mif6u56miii25a8g28phuci.apps.googleusercontent.com",
           "client_type": 1,
           "android_info": {
@@ -27,6 +35,14 @@
           "android_info": {
             "package_name": "org.marshsoft.bookreader",
             "certificate_hash": "45ec8904e5483e994e1bee6903ea103e6af2c026"
+          }
+        },
+        {
+          "client_id": "993966114933-nb33fir5pso7cs8nu6chcfjgq0vbdk20.apps.googleusercontent.com",
+          "client_type": 1,
+          "android_info": {
+            "package_name": "org.marshsoft.bookreader",
+            "certificate_hash": "9bc3324e576f2079852459a7a942293430960b27"
           }
         },
         {

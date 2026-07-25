@@ -37,8 +37,22 @@ class SettingsViewModel(
 ) : ViewModel() {
     val currentUser = authRepository.currentUser
     
+    private var pendingSyncEnable = false
+
     private val _syncStatus = MutableStateFlow<SyncRepository.SyncStatus>(SyncRepository.SyncStatus.Idle)
     val syncStatus: StateFlow<SyncRepository.SyncStatus> = _syncStatus.asStateFlow()
+
+    init {
+        viewModelScope.launch {
+            currentUser.collect { user ->
+                if (user != null && pendingSyncEnable) {
+                    toggleSync(true) {}
+                    syncAll(null)
+                    pendingSyncEnable = false
+                }
+            }
+        }
+    }
 
     var isSyncEnabled by mutableStateOf(syncPreferences.isSyncEnabled)
         private set
@@ -48,6 +62,7 @@ class SettingsViewModel(
 
     fun toggleSync(enabled: Boolean, onRequireLogin: () -> Unit) {
         if (enabled && currentUser.value == null) {
+            pendingSyncEnable = true
             onRequireLogin()
             return
         }
@@ -96,7 +111,7 @@ class SettingsViewModel(
         }
     }
 
-    fun syncAll(context: Context) {
+    fun syncAll(context: Context? = null) {
         viewModelScope.launch {
             syncRepository.syncAll(context).collect { status ->
                 _syncStatus.value = status
@@ -205,7 +220,7 @@ fun SettingsScreen(
                     onClick = onLoginClick,
                     modifier = Modifier.fillMaxWidth()
                 ) {
-                    Text("Sign in with Google")
+                    Text("SIGN IN TO SYNC")
                 }
             }
 

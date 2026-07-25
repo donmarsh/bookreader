@@ -10,13 +10,15 @@ import kotlinx.coroutines.tasks.await
 import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
+import org.marshsoft.bookreader.util.BookParser
 
 class SyncRepository(
     private val context: Context,
     private val bookDao: BookDao,
     private val authRepository: AuthRepository,
     private val syncPreferences: SyncPreferences,
-    private val googleDriveRepository: GoogleDriveRepository
+    private val googleDriveRepository: GoogleDriveRepository,
+    private val bookParser: BookParser
 ) {
     sealed class SyncStatus {
         object Idle : SyncStatus()
@@ -25,7 +27,7 @@ class SyncRepository(
         data class Error(val message: String) : SyncStatus()
     }
 
-    private val firestore: FirebaseFirestore = Firebase.firestore
+    private val firestore: FirebaseFirestore by lazy { Firebase.firestore }
 
     suspend fun syncProgress(book: BookEntity) {
         if (!syncPreferences.isSyncEnabled) return
@@ -149,7 +151,17 @@ class SyncRepository(
                     if (accessToken != null) {
                         val destinationFile = java.io.File(context.filesDir, "book_${System.currentTimeMillis()}_${identifier}.${localBook.fileType}")
                         if (googleDriveRepository.downloadFile(accessToken, identifier, destinationFile)) {
-                            bookDao.updateBook(localBook.copy(filePath = destinationFile.absolutePath))
+                            // Extract cover after successful download
+                            val publication = bookParser.parsePublication(destinationFile)
+                            val coverPath = publication?.let { pub ->
+                                bookParser.getCover(pub)?.let { bitmap ->
+                                    bookParser.saveBitmapToInternal(bitmap, "cover_${System.currentTimeMillis()}.png")
+                                }
+                            }
+                            bookDao.updateBook(localBook.copy(
+                                filePath = destinationFile.absolutePath,
+                                coverPath = coverPath ?: localBook.coverPath
+                            ))
                         }
                     }
                 }

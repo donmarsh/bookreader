@@ -1,7 +1,17 @@
 package org.marshsoft.bookreader.data.repository
 
+import android.app.Activity
 import android.content.Context
 import android.util.Log
+import androidx.credentials.ClearCredentialStateRequest
+import androidx.credentials.Credential
+import androidx.credentials.CredentialManager
+import androidx.credentials.CustomCredential
+import androidx.credentials.GetCredentialRequest
+import androidx.credentials.exceptions.GetCredentialException
+import com.google.android.libraries.identity.googleid.GetGoogleIdOption
+import com.google.android.libraries.identity.googleid.GoogleIdTokenCredential
+import com.google.android.libraries.identity.googleid.GoogleIdTokenParsingException
 import com.google.android.gms.auth.api.identity.AuthorizationRequest
 import com.google.android.gms.auth.api.identity.Identity
 import com.google.android.gms.common.Scopes
@@ -22,7 +32,8 @@ class AuthRepository(private val appContext: Context) {
         private const val TAG = "Auth"
     }
 
-    private val auth: FirebaseAuth = Firebase.auth
+    private val auth: FirebaseAuth by lazy { Firebase.auth }
+    private val credentialManager = CredentialManager.create(appContext)
 
     private val _currentUser = MutableStateFlow(auth.currentUser?.toDomain())
     val currentUser: StateFlow<User?> = _currentUser
@@ -77,15 +88,70 @@ class AuthRepository(private val appContext: Context) {
             val task = com.google.android.gms.auth.api.signin.GoogleSignIn.getSignedInAccountFromIntent(data)
             val account = task.getResult(ApiException::class.java)
             val idToken = account?.idToken ?: throw Exception("No ID token")
-            val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
-            val authResult = auth.signInWithCredential(firebaseCredential).await()
-            val user = authResult.user?.toDomain() ?: throw Exception("Sign in failed")
-            Result.success(user)
+            signInToFirebaseWithIdToken(idToken)
         } catch (e: ApiException) {
             Log.e(TAG, "Sign-in ApiException: status code = ${e.statusCode}, message = ${e.message}", e)
             Result.failure(e)
         } catch (e: Exception) {
             Log.e(TAG, "Sign-in failed", e)
+            Result.failure(e)
+        }
+    }
+
+    suspend fun signInWithCredentialManager(activity: Activity): Result<User> {
+        return try {
+            val googleIdOption = GetGoogleIdOption.Builder()
+                .setServerClientId(WEB_CLIENT_ID)
+                .setFilterByAuthorizedAccounts(false)
+                .setAutoSelectEnabled(true)
+                .build()
+
+            val request = GetCredentialRequest.Builder()
+                .addCredentialOption(googleIdOption)
+                .build()
+
+            val result = credentialManager.getCredential(activity, request)
+            handleCredentialManagerResponse(result.credential)
+        } catch (e: GetCredentialException) {
+            Log.e(TAG, "Credential Manager error: ${e.message}", e)
+            Result.failure(e)
+        } catch (e: Exception) {
+            Log.e(TAG, "Unexpected error in Credential Manager flow", e)
+            Result.failure(e)
+        }
+    }
+
+    private suspend fun handleCredentialManagerResponse(credential: Credential): Result<User> {
+        return when (credential) {
+            is CustomCredential -> {
+                if (credential.type == GoogleIdTokenCredential.TYPE_GOOGLE_ID_TOKEN_CREDENTIAL) {
+                    try {
+                        val googleIdTokenCredential = GoogleIdTokenCredential.createFrom(credential.data)
+                        signInToFirebaseWithIdToken(googleIdTokenCredential.idToken)
+                    } catch (e: GoogleIdTokenParsingException) {
+                        Log.e(TAG, "Received an invalid google id token response", e)
+                        Result.failure(e)
+                    }
+                } else {
+                    Log.e(TAG, "Unexpected type of credential: ${credential.type}")
+                    Result.failure(Exception("Unexpected type of credential"))
+                }
+            }
+            else -> {
+                Log.e(TAG, "Unexpected type of credential")
+                Result.failure(Exception("Unexpected type of credential"))
+            }
+        }
+    }
+
+    private suspend fun signInToFirebaseWithIdToken(idToken: String): Result<User> {
+        return try {
+            val firebaseCredential = GoogleAuthProvider.getCredential(idToken, null)
+            val authResult = auth.signInWithCredential(firebaseCredential).await()
+            val user = authResult.user?.toDomain() ?: throw Exception("Sign in failed")
+            Result.success(user)
+        } catch (e: Exception) {
+            Log.e(TAG, "Firebase sign-in failed", e)
             Result.failure(e)
         }
     }
@@ -96,6 +162,11 @@ class AuthRepository(private val appContext: Context) {
             googleSignInClient.signOut().await()
         } catch (e: Exception) {
             Log.w(TAG, "Failed to sign out Google client", e)
+        }
+        try {
+            credentialManager.clearCredentialState(ClearCredentialStateRequest())
+        } catch (e: Exception) {
+            Log.w(TAG, "Failed to clear credential state", e)
         }
     }
 

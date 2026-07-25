@@ -348,7 +348,15 @@ fun LibraryScreen(
                     }
                 } else {
                     Box(modifier = Modifier.fillMaxWidth().height(200.dp), contentAlignment = Alignment.Center) {
-                        Text("No books imported yet. Click + to add one.", style = MaterialTheme.typography.bodyLarge)
+                        Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                            Text("No books imported yet. Click + to add one.", style = MaterialTheme.typography.bodyLarge)
+                            if (currentUser == null) {
+                                Spacer(modifier = Modifier.height(16.dp))
+                                Button(onClick = onLoginClick) {
+                                    Text("SIGN IN TO SYNC")
+                                }
+                            }
+                        }
                     }
                 }
 
@@ -508,7 +516,7 @@ fun FirstRunSyncDialog(
         confirmButton = {
             if (!isUserLoggedIn) {
                 Button(onClick = onSignInClick) {
-                    Text("Sign In")
+                    Text("Sign in to Sync")
                 }
             } else {
                 if (syncStatus !is SyncRepository.SyncStatus.Progress) {
