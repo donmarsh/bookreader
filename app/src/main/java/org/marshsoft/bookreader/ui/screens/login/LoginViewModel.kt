@@ -21,37 +21,14 @@ class LoginViewModel(
     private val _error = MutableStateFlow<String?>(null)
     val error: StateFlow<String?> = _error.asStateFlow()
 
-    fun signInWithGoogle(
-        context: android.content.Context,
-        onSuccess: () -> Unit,
-        onLegacySignInRequired: () -> Unit
-    ) {
-        viewModelScope.launch {
-            _isLoading.value = true
-            _error.value = null
-            val result = authRepository.signInWithGoogle(context)
-            _isLoading.value = false
-
-            result.onSuccess {
-                onSuccess()
-            }.onFailure { e ->
-                if (e is AuthRepository.LegacySignInRequiredException) {
-                    onLegacySignInRequired()
-                } else {
-                    _error.value = e.message ?: "Sign in failed"
-                }
-            }
-        }
-    }
-
-    fun handleLegacySignInResult(
+    fun handleSignInResult(
         data: Intent?,
         onSuccess: () -> Unit
     ) {
         viewModelScope.launch {
             _isLoading.value = true
             _error.value = null
-            val result = authRepository.handleLegacySignInResult(data)
+            val result = authRepository.handleSignInResult(data)
             _isLoading.value = false
 
             result.onSuccess {
@@ -60,6 +37,10 @@ class LoginViewModel(
                 _error.value = e.message ?: "Sign in failed"
             }
         }
+    }
+
+    fun onSignInError(message: String) {
+        _error.value = message
     }
 
     fun signOut() {

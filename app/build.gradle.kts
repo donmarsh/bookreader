@@ -18,8 +18,8 @@ android {
         applicationId = "org.marshsoft.bookreader"
         minSdk = 29
         targetSdk = 37
-        versionCode = 11
-        versionName = "1.11"
+        versionCode = 12
+        versionName = "1.12"
 
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
     }
@@ -29,6 +29,10 @@ android {
             optimization {
                 enable = true
             }
+            proguardFiles(
+                getDefaultProguardFile("proguard-android-optimize.txt"),
+                "src/main/keepRules/rules.keep"
+            )
             ndk {
                 debugSymbolLevel = "SYMBOL_TABLE"
             }

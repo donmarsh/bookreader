@@ -36,12 +36,24 @@ fun LoginScreen(
     val error by viewModel.error.collectAsState()
     val currentUser by viewModel.currentUser.collectAsState()
 
-    // Legacy sign-in launcher
-    val legacySignInLauncher = rememberLauncherForActivityResult(
+    // Google sign-in launcher
+    val googleSignInLauncher = rememberLauncherForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { result ->
         if (result.resultCode == Activity.RESULT_OK) {
-            viewModel.handleLegacySignInResult(result.data, onGoogleSignInClick)
+            viewModel.handleSignInResult(result.data, onGoogleSignInClick)
+        } else {
+            // Log non-OK results (e.g., user cancellation or developer error)
+            val resultStatus = when (result.resultCode) {
+                Activity.RESULT_CANCELED -> "CANCELED"
+                else -> "ERROR (${result.resultCode})"
+            }
+            android.util.Log.w("LoginScreen", "Google sign-in result: $resultStatus")
+            
+            // Optionally notify the user via ViewModel if it wasn't an explicit cancellation
+            if (result.resultCode != Activity.RESULT_CANCELED) {
+                viewModel.onSignInError("Sign-in failed with code: ${result.resultCode}")
+            }
         }
     }
 
@@ -184,14 +196,7 @@ fun LoginScreen(
                 // Google Sign In Button
                 OutlinedButton(
                     onClick = {
-                        viewModel.signInWithGoogle(
-                            context = context,
-                            onSuccess = onGoogleSignInClick,
-                            onLegacySignInRequired = {
-                                // Launch legacy Google Sign-In
-                                legacySignInLauncher.launch(app.authRepository.getLegacySignInIntent())
-                            }
-                        )
+                        googleSignInLauncher.launch(app.authRepository.getSignInIntent())
                     },
                     enabled = !isLoading,
                     modifier = Modifier
