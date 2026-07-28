@@ -1,6 +1,7 @@
 package org.marshsoft.bookreader.ui.screens.reader
 
 import android.app.Activity
+import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
@@ -48,7 +49,9 @@ import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
@@ -85,6 +88,7 @@ fun ReaderScreen(
     bookId: String,
     onBackClick: () -> Unit
 ) {
+    BackHandler(onBack = onBackClick)
     val context = LocalContext.current
     val app = context.applicationContext as BookReaderApplication
     val viewModel: ReaderViewModel = viewModel(
@@ -100,15 +104,51 @@ fun ReaderScreen(
     val uiState by viewModel.uiState.collectAsState()
 
     if (uiState.isLoading) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            CircularProgressIndicator()
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("Opening Book...") },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                )
+            }
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                CircularProgressIndicator()
+            }
         }
         return
     }
 
     if (uiState.error != null) {
-        Box(modifier = Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
-            Text(text = "Error: ${uiState.error}", color = MaterialTheme.colorScheme.error)
+        Scaffold(
+            topBar = {
+                CenterAlignedTopAppBar(
+                    title = { Text("Error") },
+                    navigationIcon = {
+                        IconButton(onClick = onBackClick) {
+                            Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back")
+                        }
+                    }
+                )
+            }
+        ) { padding ->
+            Box(
+                modifier = Modifier
+                    .fillMaxSize()
+                    .padding(padding),
+                contentAlignment = Alignment.Center
+            ) {
+                Text(text = "Error: ${uiState.error}", color = MaterialTheme.colorScheme.error)
+            }
         }
         return
     }
@@ -120,7 +160,7 @@ fun ReaderScreen(
     val readerBackground = when (uiState.preferences.theme) {
         Theme.DARK -> Color(0xFF121212) // Material Dark Surface
         Theme.SEPIA -> Color(0xFFF5EBCF) // Traditional Sepia
-        else -> Color(0xFFFCF9F4) // Match DESIGN.md surface (#fcf9f4)
+        else -> Color.White // Match Readium's default Light theme background
     }
 
     val contentColor = when (uiState.preferences.theme) {
@@ -128,16 +168,22 @@ fun ReaderScreen(
         else -> Color.Black
     }
 
-    // Handle Status Bar Visibility
+    // Handle System Bar Colors and Visibility
     val activity = context as? Activity
     val window = activity?.window
     if (window != null) {
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
-        LaunchedEffect(uiState.isHudVisible) {
+        
+        LaunchedEffect(uiState.isHudVisible, readerBackground) {
             if (uiState.isHudVisible) {
                 insetsController.show(WindowInsetsCompat.Type.statusBars())
+                window.statusBarColor = readerBackground.toArgb()
+                window.navigationBarColor = readerBackground.toArgb()
             } else {
                 insetsController.hide(WindowInsetsCompat.Type.statusBars())
+                // In immersive mode, make bars transparent or match background
+                window.statusBarColor = Color.Transparent.toArgb()
+                window.navigationBarColor = Color.Transparent.toArgb()
             }
         }
         
@@ -182,6 +228,7 @@ fun ReaderScreen(
                         initialProgress = book.progress,
                         preferences = uiState.preferences,
                         pendingLocator = uiState.pendingLocator,
+                        backgroundColor = readerBackground,
                         onProgressChanged = { viewModel.updateProgress(it) },
                         onToggleHud = { viewModel.toggleHud() },
                         onLocatorConsumed = { viewModel.onLocatorConsumed() }
@@ -197,9 +244,11 @@ fun ReaderScreen(
             AnimatedVisibility(
                 visible = uiState.isHudVisible,
                 enter = slideInVertically(initialOffsetY = { -it }),
-                exit = slideOutVertically(targetOffsetY = { -it })
+                exit = slideOutVertically(targetOffsetY = { -it }),
+                modifier = Modifier.zIndex(1f)
             ) {
                 Surface(
+                    modifier = Modifier.fillMaxWidth(),
                     color = readerBackground.copy(alpha = 0.98f),
                     contentColor = contentColor,
                     tonalElevation = 2.dp
@@ -266,7 +315,9 @@ fun ReaderScreen(
                 visible = uiState.isHudVisible,
                 enter = slideInVertically(initialOffsetY = { it }),
                 exit = slideOutVertically(targetOffsetY = { it }),
-                modifier = Modifier.align(Alignment.BottomCenter)
+                modifier = Modifier
+                    .align(Alignment.BottomCenter)
+                    .zIndex(1f)
             ) {
                 Surface(
                     modifier = Modifier
@@ -284,26 +335,28 @@ fun ReaderScreen(
                         verticalAlignment = Alignment.CenterVertically,
                         horizontalArrangement = Arrangement.spacedBy(4.dp)
                     ) {
-                        IconButton(onClick = {
-                            val currentSize = uiState.preferences.fontSize ?: 1.0
-                            viewModel.updateFontSize((currentSize - 0.1).coerceAtLeast(0.5))
-                        }) {
-                            Icon(
-                                Icons.Default.TextDecrease, 
-                                contentDescription = "Decrease font size",
-                                tint = contentColor
-                            )
-                        }
-                        
-                        IconButton(onClick = {
-                            val currentSize = uiState.preferences.fontSize ?: 1.0
-                            viewModel.updateFontSize((currentSize + 0.1).coerceAtMost(3.0))
-                        }) {
-                            Icon(
-                                Icons.Default.TextIncrease, 
-                                contentDescription = "Increase font size",
-                                tint = contentColor
-                            )
+                        if (book.fileType != "pdf") {
+                            IconButton(onClick = {
+                                val currentSize = uiState.preferences.fontSize ?: 1.0
+                                viewModel.updateFontSize((currentSize - 0.1).coerceAtLeast(0.5))
+                            }) {
+                                Icon(
+                                    Icons.Default.TextDecrease, 
+                                    contentDescription = "Decrease font size",
+                                    tint = contentColor
+                                )
+                            }
+                            
+                            IconButton(onClick = {
+                                val currentSize = uiState.preferences.fontSize ?: 1.0
+                                viewModel.updateFontSize((currentSize + 0.1).coerceAtMost(3.0))
+                            }) {
+                                Icon(
+                                    Icons.Default.TextIncrease, 
+                                    contentDescription = "Increase font size",
+                                    tint = contentColor
+                                )
+                            }
                         }
 
                         IconButton(onClick = {
@@ -358,6 +411,7 @@ fun ReadiumNavigator(
     initialProgress: Float,
     preferences: org.readium.r2.navigator.epub.EpubPreferences,
     pendingLocator: Locator?,
+    backgroundColor: Color,
     onProgressChanged: (Locator) -> Unit,
     onToggleHud: () -> Unit,
     onLocatorConsumed: () -> Unit
@@ -417,10 +471,12 @@ fun ReadiumNavigator(
         factory = { ctx ->
             FragmentContainerView(ctx).apply {
                 id = containerId
+                setBackgroundColor(backgroundColor.toArgb())
             }
         },
         modifier = Modifier.fillMaxSize(),
-        update = { _ ->
+        update = { view ->
+            view.setBackgroundColor(backgroundColor.toArgb())
             val fragmentManager = activity.supportFragmentManager
             val currentFragment = fragmentManager.findFragmentById(containerId)
             

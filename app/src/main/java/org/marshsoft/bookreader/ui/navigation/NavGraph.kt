@@ -52,7 +52,7 @@ fun NavGraph(
             val bookId = backStackEntry.arguments?.getString("bookId") ?: ""
             ReaderScreen(
                 bookId = bookId,
-                onBackClick = { navController.popBackStack() }
+                onBackClick = { navController.navigateUp() }
             )
         }
     }

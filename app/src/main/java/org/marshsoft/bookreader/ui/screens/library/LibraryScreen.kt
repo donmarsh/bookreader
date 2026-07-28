@@ -4,7 +4,20 @@ import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
-import androidx.compose.foundation.layout.*
+import androidx.compose.foundation.layout.Arrangement
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
+import androidx.compose.foundation.layout.Row
+import androidx.compose.foundation.layout.Spacer
+import androidx.compose.foundation.layout.WindowInsets
+import androidx.compose.foundation.layout.fillMaxSize
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.offset
+import androidx.compose.foundation.layout.padding
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.statusBars
+import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
@@ -13,14 +26,43 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
+import androidx.compose.material.icons.automirrored.filled.LibraryBooks
 import androidx.compose.material.icons.filled.Add
-import androidx.compose.material.icons.filled.CreateNewFolder
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
 import androidx.compose.material.icons.filled.Search
-import androidx.compose.material3.*
-import androidx.compose.runtime.*
+import androidx.compose.material3.AlertDialog
+import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
+import androidx.compose.material3.Checkbox
+import androidx.compose.material3.ExperimentalMaterial3Api
+import androidx.compose.material3.FilterChip
+import androidx.compose.material3.FilterChipDefaults
+import androidx.compose.material3.FloatingActionButton
+import androidx.compose.material3.Icon
+import androidx.compose.material3.IconButton
+import androidx.compose.material3.LinearProgressIndicator
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SmallFloatingActionButton
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
+import androidx.compose.material3.Surface
+import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.material3.TextField
+import androidx.compose.material3.TextFieldDefaults
+import androidx.compose.material3.TopAppBar
+import androidx.compose.material3.TopAppBarDefaults
+import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.runtime.collectAsState
+import androidx.compose.runtime.getValue
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
+import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
@@ -35,8 +77,8 @@ import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
 import coil3.compose.AsyncImage
 import org.marshsoft.bookreader.BookReaderApplication
-import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.data.repository.SyncRepository
+import org.marshsoft.bookreader.domain.model.Book
 
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -85,8 +127,6 @@ fun LibraryScreen(
 
     var isSearchActive by remember { mutableStateOf(false) }
     var showImportMenu by remember { mutableStateOf(false) }
-    var showFolderTypeDialog by remember { mutableStateOf(false) }
-    var pendingFolderUri by remember { mutableStateOf<android.net.Uri?>(null) }
     var fullDescriptionToShow by remember { mutableStateOf<String?>(null) }
     
     val currentReading = if (searchQuery.isEmpty()) books.firstOrNull() else null
@@ -104,25 +144,12 @@ fun LibraryScreen(
         uri?.let { viewModel.importBook(context, it) }
     }
 
-    val folderLauncher = rememberLauncherForActivityResult(
-        contract = ActivityResultContracts.OpenDocumentTree()
-    ) { uri ->
-        uri?.let { 
-            pendingFolderUri = it
-            showFolderTypeDialog = true
+    val multiLauncher = rememberLauncherForActivityResult(
+        contract = ActivityResultContracts.OpenMultipleDocuments()
+    ) { uris ->
+        if (uris.isNotEmpty()) {
+            viewModel.importBooks(context, uris)
         }
-    }
-
-    if (showFolderTypeDialog) {
-        FolderTypeDialog(
-            onDismiss = { showFolderTypeDialog = false },
-            onConfirm = { types ->
-                showFolderTypeDialog = false
-                pendingFolderUri?.let { uri ->
-                    viewModel.importFolder(context, uri, types)
-                }
-            }
-        )
     }
 
     if (uiState.showFirstRunPrompt) {
@@ -161,7 +188,7 @@ fun LibraryScreen(
                     SmallFloatingActionButton(
                         onClick = { 
                             showImportMenu = false
-                            launcher.launch(arrayOf("application/epub+zip", "application/pdf"))
+                            launcher.launch(arrayOf("application/epub+zip", "application/pdf", "application/x-epub+zip"))
                         },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         modifier = Modifier.padding(bottom = 8.dp)
@@ -171,12 +198,18 @@ fun LibraryScreen(
                     SmallFloatingActionButton(
                         onClick = { 
                             showImportMenu = false
-                            folderLauncher.launch(null)
+                            multiLauncher.launch(arrayOf(
+                                "application/epub+zip", 
+                                "application/x-epub+zip",
+                                "application/pdf",
+                                "application/x-pdf",
+                                "application/octet-stream"
+                            ))
                         },
                         containerColor = MaterialTheme.colorScheme.secondaryContainer,
                         modifier = Modifier.padding(bottom = 8.dp)
                     ) {
-                        Icon(Icons.Default.CreateNewFolder, contentDescription = "Import Folder")
+                        Icon(Icons.AutoMirrored.Filled.LibraryBooks, contentDescription = "Multi-Select Import")
                     }
                 }
                 
@@ -190,45 +223,87 @@ fun LibraryScreen(
             }
         },
         topBar = {
-            if (isSearchActive) {
-                SearchTopBar(
-                    query = searchQuery,
-                    onQueryChange = { viewModel.onSearchQueryChange(it) },
-                    onCloseClick = { 
-                        isSearchActive = false
-                        viewModel.onSearchQueryChange("")
-                    }
-                )
-            } else {
-                TopAppBar(
-                    title = {
-                        Column {
-                            Text(
-                                "THE BOOK SANCTUARY",
-                                style = MaterialTheme.typography.labelSmall,
-                                color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
-                            )
-                            Text(
-                                "My Library",
-                                style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
-                            )
+            Column {
+                if (isSearchActive) {
+                    SearchTopBar(
+                        query = searchQuery,
+                        onQueryChange = { viewModel.onSearchQueryChange(it) },
+                        onCloseClick = { 
+                            isSearchActive = false
+                            viewModel.onSearchQueryChange("")
                         }
-                    },
-                    windowInsets = WindowInsets.statusBars,
-                    navigationIcon = {
-                        IconButton(onClick = onMenuClick) {
-                            Icon(Icons.Default.Menu, contentDescription = "Menu")
-                        }
-                    },
-                    actions = {
-                        IconButton(onClick = { isSearchActive = true }) {
-                            Icon(Icons.Default.Search, contentDescription = "Search")
-                        }
-                    },
-                    colors = TopAppBarDefaults.topAppBarColors(
-                        containerColor = MaterialTheme.colorScheme.surface
                     )
-                )
+                } else {
+                    TopAppBar(
+                        title = {
+                            Column {
+                                Text(
+                                    "THE BOOK SANCTUARY",
+                                    style = MaterialTheme.typography.labelSmall,
+                                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.5f)
+                                )
+                                Text(
+                                    "My Library",
+                                    style = MaterialTheme.typography.titleLarge.copy(fontWeight = FontWeight.Bold)
+                                )
+                            }
+                        },
+                        windowInsets = WindowInsets.statusBars,
+                        navigationIcon = {
+                            IconButton(onClick = onMenuClick) {
+                                Icon(Icons.Default.Menu, contentDescription = "Menu")
+                            }
+                        },
+                        actions = {
+                            IconButton(onClick = { isSearchActive = true }) {
+                                Icon(Icons.Default.Search, contentDescription = "Search")
+                            }
+                        },
+                        colors = TopAppBarDefaults.topAppBarColors(
+                            containerColor = MaterialTheme.colorScheme.surface
+                        )
+                    )
+                }
+                
+                // Import Progress Indicator
+                if (uiState.importProgress is ImportStatus.Loading) {
+                    val progress = uiState.importProgress as ImportStatus.Loading
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.surface)
+                            .padding(horizontal = 24.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = progress.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${progress.current}/${progress.total}",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { progress.current.toFloat() / progress.total },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = MaterialTheme.colorScheme.primary,
+                            trackColor = MaterialTheme.colorScheme.primary.copy(alpha = 0.1f)
+                        )
+                    }
+                }
             }
         }
     ) { padding ->
@@ -529,52 +604,6 @@ fun FirstRunSyncDialog(
         dismissButton = {
             TextButton(onClick = onDismiss, enabled = syncStatus !is SyncRepository.SyncStatus.Progress) {
                 Text("Later")
-            }
-        }
-    )
-}
-
-@Composable
-fun FolderTypeDialog(
-    onDismiss: () -> Unit,
-    onConfirm: (Set<String>) -> Unit
-) {
-    var includeEpub by remember { mutableStateOf(true) }
-    var includePdf by remember { mutableStateOf(true) }
-
-    AlertDialog(
-        onDismissRequest = onDismiss,
-        title = { Text("Import Folder") },
-        text = {
-            Column {
-                Text("Select file types to search for:")
-                Spacer(modifier = Modifier.height(16.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = includeEpub, onCheckedChange = { includeEpub = it })
-                    Text("EPUB Files")
-                }
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Checkbox(checked = includePdf, onCheckedChange = { includePdf = it })
-                    Text("PDF Files")
-                }
-            }
-        },
-        confirmButton = {
-            TextButton(
-                onClick = {
-                    val types = mutableSetOf<String>()
-                    if (includeEpub) types.add("epub")
-                    if (includePdf) types.add("pdf")
-                    onConfirm(types)
-                },
-                enabled = includeEpub || includePdf
-            ) {
-                Text("Import")
-            }
-        },
-        dismissButton = {
-            TextButton(onClick = onDismiss) {
-                Text("Cancel")
             }
         }
     )

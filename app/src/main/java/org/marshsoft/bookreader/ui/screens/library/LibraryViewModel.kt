@@ -19,15 +19,20 @@ import org.marshsoft.bookreader.data.repository.SyncRepository
 import org.marshsoft.bookreader.data.repository.AuthRepository
 import org.marshsoft.bookreader.domain.model.Book
 import org.marshsoft.bookreader.util.BookParser
-import androidx.documentfile.provider.DocumentFile
 import java.io.File
 
 data class LibraryUiState(
     val message: String? = null,
     val showFirstRunPrompt: Boolean = false,
     val syncStatus: SyncRepository.SyncStatus = SyncRepository.SyncStatus.Idle,
+    val importProgress: ImportStatus = ImportStatus.Idle,
     val bookToDelete: Book? = null
 )
+
+sealed class ImportStatus {
+    object Idle : ImportStatus()
+    data class Loading(val current: Int, val total: Int, val message: String) : ImportStatus()
+}
 
 class LibraryViewModel(
     private val bookDao: BookDao,
@@ -107,7 +112,18 @@ class LibraryViewModel(
 
     fun importBook(context: android.content.Context, uri: Uri) {
         viewModelScope.launch {
+            val fileName = bookParser.getFileName(uri) ?: "Book"
+            _uiState.value = _uiState.value.copy(
+                importProgress = ImportStatus.Loading(
+                    current = 1,
+                    total = 1,
+                    message = "Importing $fileName..."
+                )
+            )
+            
             val result = importBookInternal(context, uri, null)
+            _uiState.value = _uiState.value.copy(importProgress = ImportStatus.Idle)
+            
             when (result) {
                 ImportResult.DUPLICATE -> _uiState.value = _uiState.value.copy(message = "This book is already in your library")
                 ImportResult.FAILURE -> _uiState.value = _uiState.value.copy(message = "Failed to import book")
@@ -116,48 +132,47 @@ class LibraryViewModel(
         }
     }
 
-    fun importFolder(context: android.content.Context, treeUri: Uri, allowedTypes: Set<String>) {
+    fun importBooks(context: android.content.Context, uris: List<Uri>) {
         viewModelScope.launch {
-            val root = DocumentFile.fromTreeUri(context, treeUri) ?: return@launch
-            val files = mutableListOf<DocumentFile>()
+            if (uris.isEmpty()) return@launch
             
-            fun collectFiles(dir: DocumentFile) {
-                dir.listFiles().forEach { file ->
-                    if (file.isDirectory) {
-                        collectFiles(file)
-                    } else {
-                        val name = file.name?.lowercase() ?: ""
-                        if ((allowedTypes.contains("epub") && name.endsWith(".epub")) ||
-                            (allowedTypes.contains("pdf") && name.endsWith(".pdf"))) {
-                            files.add(file)
-                        }
-                    }
-                }
-            }
-            
-            collectFiles(root)
-            
-            if (files.isEmpty()) {
-                _uiState.value = _uiState.value.copy(message = "No matching books found in folder")
+            if (uris.size == 1) {
+                importBook(context, uris[0])
                 return@launch
             }
-            
-            _uiState.value = _uiState.value.copy(message = "Importing ${files.size} books...")
-            
+
             var importedCount = 0
             var duplicateCount = 0
+            var failureCount = 0
             
-            files.forEach { file ->
-                val result = importBookInternal(context, file.uri, file.name)
-                if (result == ImportResult.SUCCESS) importedCount++
-                else if (result == ImportResult.DUPLICATE) duplicateCount++
+            uris.forEachIndexed { index, uri ->
+                val fileName = bookParser.getFileName(uri) ?: "Book"
+                _uiState.value = _uiState.value.copy(
+                    importProgress = ImportStatus.Loading(
+                        current = index + 1,
+                        total = uris.size,
+                        message = "Importing $fileName..."
+                    )
+                )
+                
+                val result = importBookInternal(context, uri, null)
+                when (result) {
+                    ImportResult.SUCCESS -> importedCount++
+                    ImportResult.DUPLICATE -> duplicateCount++
+                    ImportResult.FAILURE -> failureCount++
+                }
             }
             
             val finalMessage = buildString {
                 append("Imported $importedCount books.")
                 if (duplicateCount > 0) append(" $duplicateCount duplicates skipped.")
+                if (failureCount > 0) append(" $failureCount failures.")
             }
-            _uiState.value = _uiState.value.copy(message = finalMessage)
+            
+            _uiState.value = _uiState.value.copy(
+                message = finalMessage,
+                importProgress = ImportStatus.Idle
+            )
         }
     }
 
@@ -259,7 +274,8 @@ class LibraryViewModel(
                 publisher = publisher,
                 publishedDate = publishedDate,
                 language = language,
-                identifier = identifier
+                identifier = identifier,
+                lastReadTimestamp = 0L // New imports go to the bottom
             )
             bookDao.insertBook(entity)
             syncRepository.uploadBook(entity, context)

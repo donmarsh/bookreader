@@ -71,8 +71,12 @@ class ReaderViewModel(
                 
                 val entity = bookDao.getBookById(idLong)
                 if (entity != null) {
-                    syncRepository.syncProgress(entity)
-                    val updatedEntity = bookDao.getBookById(idLong) ?: entity
+                    // Update last read timestamp immediately when book is opened
+                    val initialUpdatedEntity = entity.copy(lastReadTimestamp = System.currentTimeMillis())
+                    bookDao.updateBook(initialUpdatedEntity)
+                    
+                    syncRepository.syncProgress(initialUpdatedEntity)
+                    val updatedEntity = bookDao.getBookById(idLong) ?: initialUpdatedEntity
                     val book = updatedEntity.toDomain()
                     val publication = bookParser.parsePublication(File(book.filePath))
                     val totalPages = publication?.findService(PositionsService::class)?.positions()?.size
@@ -179,7 +183,6 @@ class ReaderViewModel(
     }
 
     override fun onCleared() {
-        super.onCleared()
         uiState.value.publication?.close()
     }
 }
