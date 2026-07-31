@@ -1,5 +1,6 @@
 package org.marshsoft.bookreader.ui.navigation
 
+import android.net.Uri
 import androidx.compose.runtime.Composable
 import androidx.compose.ui.Modifier
 import androidx.navigation.NavHostController
@@ -16,6 +17,8 @@ fun NavGraph(
     navController: NavHostController,
     onMenuClick: () -> Unit,
     modifier: Modifier = Modifier,
+    pendingBookUri: Uri? = null,
+    onPendingBookUriHandled: (Uri) -> Unit = {},
     startDestination: String = Screen.Library.route,
 
 ) {
@@ -39,7 +42,9 @@ fun NavGraph(
             LibraryScreen(
                 onMenuClick = onMenuClick,
                 onBookClick = { bookId -> navController.navigate(Screen.Reader.createRoute(bookId)) },
-                onLoginClick = { navController.navigate(Screen.Login.route) }
+                onLoginClick = { navController.navigate(Screen.Login.route) },
+                pendingBookUri = pendingBookUri,
+                onPendingBookUriHandled = onPendingBookUriHandled
             )
         }
         composable(Screen.Settings.route) {

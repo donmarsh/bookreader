@@ -44,6 +44,12 @@ class SettingsViewModel(
 
     init {
         viewModelScope.launch {
+            syncRepository.syncStatus.collect { status ->
+                _syncStatus.value = status
+            }
+        }
+        
+        viewModelScope.launch {
             currentUser.collect { user ->
                 if (user != null && pendingSyncEnable) {
                     toggleSync(true) {}
@@ -113,14 +119,14 @@ class SettingsViewModel(
 
     fun syncAll(context: Context? = null) {
         viewModelScope.launch {
-            syncRepository.syncAll(context).collect { status ->
-                _syncStatus.value = status
+            syncRepository.syncAll(context).collect { 
+                // Observe via global flow
             }
         }
     }
 
     fun clearSyncStatus() {
-        _syncStatus.value = SyncRepository.SyncStatus.Idle
+        syncRepository.clearSyncStatus()
     }
 }
 

@@ -3,10 +3,18 @@ package org.marshsoft.bookreader.data.repository
 import android.content.Context
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FirebaseFirestore
+import com.google.firebase.firestore.SetOptions
 import com.google.firebase.firestore.firestore
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.flow.Flow
-import kotlinx.coroutines.flow.flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.StateFlow
+import kotlinx.coroutines.flow.asStateFlow
+import kotlinx.coroutines.launch
 import kotlinx.coroutines.tasks.await
+import java.security.MessageDigest
 import org.marshsoft.bookreader.data.local.SyncPreferences
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
@@ -28,36 +36,68 @@ class SyncRepository(
     }
 
     private val firestore: FirebaseFirestore by lazy { Firebase.firestore }
+    private val repositoryScope = CoroutineScope(SupervisorJob() + Dispatchers.IO)
+
+    private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
+    val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
+
+    private var syncJob: kotlinx.coroutines.Job? = null
+
+    private fun normalizedBookIdentifier(book: BookEntity): String {
+        return book.identifier?.takeIf { it.isNotBlank() }
+            ?: "${book.title}_${book.author}"
+    }
+
+    private fun firestoreBookId(identifier: String): String {
+        val bytes = MessageDigest.getInstance("SHA-256")
+            .digest(identifier.trim().toByteArray(Charsets.UTF_8))
+        return bytes.joinToString("") { "%02x".format(it) }
+    }
 
     suspend fun syncProgress(book: BookEntity) {
         if (!syncPreferences.isSyncEnabled) return
+        syncBookMetadata(book, reconcileProgress = true)
+    }
+
+    private suspend fun syncBookMetadata(book: BookEntity, reconcileProgress: Boolean) {
         val user = authRepository.currentUser.value ?: return
-        val identifier = book.identifier ?: "${book.title}_${book.author}".hashCode().toString()
+        val identifier = normalizedBookIdentifier(book)
+        val documentId = firestoreBookId(identifier)
         
         val remoteDoc = firestore.collection("users").document(user.id)
-            .collection("books").document(identifier)
+            .collection("books").document(documentId)
         
         try {
             val remoteData = remoteDoc.get().await()
             if (remoteData.exists()) {
                 val remoteTimestamp = remoteData.getLong("lastReadTimestamp") ?: 0L
                 if (remoteTimestamp > book.lastReadTimestamp) {
-                    // Remote is newer, update local
-                    val progress = remoteData.getDouble("progress")?.toFloat() ?: 0f
-                    val location = remoteData.getString("lastReadLocation")
-                    bookDao.updateBook(book.copy(
-                        progress = progress,
-                        lastReadLocation = location,
-                        lastReadTimestamp = remoteTimestamp
-                    ))
+                    if (reconcileProgress) {
+                        // Remote is newer, update local
+                        val progress = remoteData.getDouble("progress")?.toFloat() ?: 0f
+                        val location = remoteData.getString("lastReadLocation")
+                        bookDao.updateBook(book.copy(
+                            progress = progress,
+                            lastReadLocation = location,
+                            lastReadTimestamp = remoteTimestamp
+                        ))
+                    } else {
+                        remoteDoc.set(mapOf(
+                            "title" to book.title,
+                            "author" to book.author,
+                            "fileType" to book.fileType
+                        ), SetOptions.merge()).await()
+                    }
                     return
                 }
             }
             
             // Local is newer or remote doesn't exist, update remote
             remoteDoc.set(mapOf(
+                "identifier" to identifier,
                 "title" to book.title,
                 "author" to book.author,
+                "fileType" to book.fileType,
                 "progress" to book.progress,
                 "lastReadLocation" to book.lastReadLocation,
                 "lastReadTimestamp" to book.lastReadTimestamp
@@ -67,57 +107,97 @@ class SyncRepository(
         }
     }
 
+    suspend fun syncBook(book: BookEntity, activityContext: Context? = null) {
+        if (syncPreferences.isSyncEnabled) {
+            syncProgress(book)
+        } else if (syncPreferences.isDriveSyncEnabled) {
+            syncBookMetadata(book, reconcileProgress = false)
+        }
+        uploadBook(book, activityContext)
+    }
+
     suspend fun uploadBook(book: BookEntity, activityContext: Context? = null) {
         if (!syncPreferences.isDriveSyncEnabled) return
         authRepository.currentUser.value ?: return
-        val identifier = book.identifier ?: "${book.title}_${book.author}".hashCode().toString()
+        val identifier = normalizedBookIdentifier(book)
         val file = java.io.File(book.filePath)
         if (!file.exists()) return
 
-        val accessToken = authRepository.getAccessToken(activityContext ?: context) ?: return
-        googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType)
+        // Try with activity context first if available, then fallback to app context
+        var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
+        if (accessToken == null) {
+            accessToken = authRepository.getAccessToken(context)
+        }
+        
+        if (accessToken != null) {
+            googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType)
+        }
     }
 
-    fun syncAll(activityContext: Context? = null): Flow<SyncStatus> = flow {
-        if (!syncPreferences.isSyncEnabled) {
-            emit(SyncStatus.Error("Sync is disabled in settings"))
-            return@flow
+    fun syncAll(activityContext: Context? = null): Flow<SyncStatus> {
+        if (syncStatus.value is SyncStatus.Progress) return syncStatus
+        
+        syncJob?.cancel()
+        syncJob = repositoryScope.launch {
+            performSyncAll(activityContext)
+        }
+        return syncStatus
+    }
+
+    private suspend fun performSyncAll(activityContext: Context? = null) {
+        if (!syncPreferences.isSyncEnabled && !syncPreferences.isDriveSyncEnabled) {
+            val error = "Sync is disabled in settings"
+            _syncStatus.value = SyncStatus.Error(error)
+            return
         }
         
         val user = authRepository.currentUser.value
         if (user == null) {
-            emit(SyncStatus.Error("User not signed in"))
-            return@flow
+            val error = "User not signed in"
+            _syncStatus.value = SyncStatus.Error(error)
+            return
         }
         
         try {
-            emit(SyncStatus.Progress(0, 1, "Fetching remote library..."))
+            _syncStatus.value = SyncStatus.Progress(0, 1, "Starting sync...")
+
+            val localBooks = bookDao.getAllBooksOnce()
             
-            // 1. Fetch all books from Firestore
+            // 1. Sync local metadata to Firestore first
+            if (localBooks.isNotEmpty()) {
+                _syncStatus.value = SyncStatus.Progress(0, localBooks.size, "Syncing local library...")
+                for ((index, book) in localBooks.withIndex()) {
+                    _syncStatus.value = SyncStatus.Progress(index + 1, localBooks.size, "Syncing ${book.title}...")
+                    syncBook(book, activityContext)
+                }
+            }
+
+            _syncStatus.value = SyncStatus.Progress(0, 1, "Fetching remote library...")
+            
+            // 2. Fetch all books from Firestore
             val remoteBooksQuery = firestore.collection("users").document(user.id)
                 .collection("books").get().await()
             
             val remoteDocs = remoteBooksQuery.documents
-            val totalSteps = remoteDocs.size
+            // Sort by lastReadTimestamp DESC to prioritize the most recently read book
+            val sortedDocs = remoteDocs.sortedByDescending { it.getLong("lastReadTimestamp") ?: 0L }
+            val totalSteps = sortedDocs.size
             
-            emit(SyncStatus.Progress(0, totalSteps.coerceAtLeast(1), "Processing remote books..."))
+            _syncStatus.value = SyncStatus.Progress(0, totalSteps.coerceAtLeast(1), "Processing remote books...")
             
-            for ((index, doc) in remoteDocs.withIndex()) {
-                val identifier = doc.id
+            for ((index, doc) in sortedDocs.withIndex()) {
+                val identifier = doc.getString("identifier") ?: doc.id
                 val title = doc.getString("title") ?: "Unknown Title"
                 val author = doc.getString("author") ?: "Unknown Author"
                 
-                emit(SyncStatus.Progress(index + 1, totalSteps, "Syncing $title..."))
+                _syncStatus.value = SyncStatus.Progress(index + 1, totalSteps, "Syncing $title...")
                 
                 var localBook = bookDao.getBookByIdentifier(identifier)
                 if (localBook == null) {
-                    // Try by title and author as fallback
                     localBook = bookDao.getBookByTitleAndAuthor(title, author)
                 }
                 
                 if (localBook == null) {
-                    // Create placeholder local book entry
-                    // Note: file and cover will be downloaded if Drive sync is enabled
                     val newBook = BookEntity(
                         title = title,
                         author = author,
@@ -125,13 +205,12 @@ class SyncRepository(
                         progress = doc.getDouble("progress")?.toFloat() ?: 0f,
                         lastReadLocation = doc.getString("lastReadLocation"),
                         lastReadTimestamp = doc.getLong("lastReadTimestamp") ?: 0L,
-                        filePath = "", // Temporary empty, will be updated if downloaded
+                        filePath = "",
                         fileType = doc.getString("fileType") ?: "epub"
                     )
                     val id = bookDao.insertBook(newBook)
                     localBook = newBook.copy(id = id)
                 } else {
-                    // Update existing local book if remote is newer
                     val remoteTimestamp = doc.getLong("lastReadTimestamp") ?: 0L
                     if (remoteTimestamp > localBook.lastReadTimestamp) {
                         val progress = doc.getDouble("progress")?.toFloat() ?: 0f
@@ -144,14 +223,18 @@ class SyncRepository(
                     }
                 }
                 
-                // 2. If book file is missing and Drive sync is enabled, try to restore
+                // 3. Prioritized Restore from Drive
                 val file = if (localBook.filePath.isNotEmpty()) java.io.File(localBook.filePath) else null
                 if ((file == null || !file.exists()) && syncPreferences.isDriveSyncEnabled) {
-                    val accessToken = authRepository.getAccessToken(activityContext ?: context)
+                    // Try with activity context first if available, then fallback to app context
+                    var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
+                    if (accessToken == null) {
+                        accessToken = authRepository.getAccessToken(context)
+                    }
+
                     if (accessToken != null) {
                         val destinationFile = java.io.File(context.filesDir, "book_${System.currentTimeMillis()}_${identifier}.${localBook.fileType}")
                         if (googleDriveRepository.downloadFile(accessToken, identifier, destinationFile)) {
-                            // Extract cover after successful download
                             val publication = bookParser.parsePublication(destinationFile)
                             val coverPath = publication?.let { pub ->
                                 bookParser.getCover(pub)?.let { bitmap ->
@@ -167,21 +250,27 @@ class SyncRepository(
                 }
             }
             
-            emit(SyncStatus.Success)
+            _syncStatus.value = SyncStatus.Success
         } catch (e: Exception) {
             e.printStackTrace()
-            emit(SyncStatus.Error(e.message ?: "Unknown error occurred during sync"))
+            val error = e.message ?: "Unknown error occurred during sync"
+            _syncStatus.value = SyncStatus.Error(error)
         }
+    }
+
+    fun clearSyncStatus() {
+        _syncStatus.value = SyncStatus.Idle
     }
 
     suspend fun deleteRemoteBook(book: BookEntity, deleteFromDrive: Boolean, activityContext: Context? = null) {
         val user = authRepository.currentUser.value ?: return
-        val identifier = book.identifier ?: "${book.title}_${book.author}".hashCode().toString()
+        val identifier = normalizedBookIdentifier(book)
+        val documentId = firestoreBookId(identifier)
 
         // 1. Delete from Firestore
         try {
             firestore.collection("users").document(user.id)
-                .collection("books").document(identifier)
+                .collection("books").document(documentId)
                 .delete().await()
         } catch (e: Exception) {
             e.printStackTrace()

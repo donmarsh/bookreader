@@ -1,5 +1,6 @@
 package org.marshsoft.bookreader.ui
 
+import android.net.Uri
 import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -27,6 +28,7 @@ import androidx.compose.material3.Scaffold
 import androidx.compose.material3.Text
 import androidx.compose.material3.rememberDrawerState
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.collectAsState
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.rememberCoroutineScope
@@ -49,7 +51,10 @@ import org.marshsoft.bookreader.ui.navigation.NavGraph
 import org.marshsoft.bookreader.ui.navigation.Screen
 
 @Composable
-fun MainScreen() {
+fun MainScreen(
+    pendingBookUri: Uri? = null,
+    onPendingBookUriHandled: (Uri) -> Unit = {}
+) {
     val context = LocalContext.current
     val app = context.applicationContext as BookReaderApplication
     val viewModel: MainViewModel = viewModel(
@@ -69,6 +74,17 @@ fun MainScreen() {
     val scope = rememberCoroutineScope()
 
     val isReaderScreen = currentRoute?.startsWith(Screen.Reader.route.substringBefore("{")) == true
+
+    LaunchedEffect(pendingBookUri) {
+        if (pendingBookUri != null && currentRoute != Screen.Library.route) {
+            navController.navigate(Screen.Library.route) {
+                popUpTo(Screen.Library.route) {
+                    inclusive = false
+                }
+                launchSingleTop = true
+            }
+        }
+    }
 
     ModalNavigationDrawer(
         drawerState = drawerState,
@@ -195,6 +211,8 @@ fun MainScreen() {
             NavGraph(
                 navController = navController,
                 onMenuClick = { scope.launch { drawerState.open() } },
+                pendingBookUri = pendingBookUri,
+                onPendingBookUriHandled = onPendingBookUriHandled,
                 modifier = Modifier.padding(innerPadding)
             )
         }

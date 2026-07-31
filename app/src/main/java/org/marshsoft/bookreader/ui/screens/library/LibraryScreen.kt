@@ -1,5 +1,6 @@
 package org.marshsoft.bookreader.ui.screens.library
 
+import android.net.Uri
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.compose.foundation.background
@@ -85,7 +86,9 @@ import org.marshsoft.bookreader.domain.model.Book
 fun LibraryScreen(
     onMenuClick: () -> Unit,
     onBookClick: (String) -> Unit,
-    onLoginClick: () -> Unit
+    onLoginClick: () -> Unit,
+    pendingBookUri: Uri? = null,
+    onPendingBookUriHandled: (Uri) -> Unit = {}
 ) {
     val context = LocalContext.current
     val app = context.applicationContext as BookReaderApplication
@@ -135,6 +138,13 @@ fun LibraryScreen(
         uiState.message?.let {
             snackbarHostState.showSnackbar(it)
             viewModel.clearMessage()
+        }
+    }
+
+    LaunchedEffect(pendingBookUri) {
+        pendingBookUri?.let { uri ->
+            viewModel.importBook(context, uri)
+            onPendingBookUriHandled(uri)
         }
     }
 
@@ -304,6 +314,46 @@ fun LibraryScreen(
                         )
                     }
                 }
+
+                // Sync Progress Indicator
+                if (uiState.syncStatus is SyncRepository.SyncStatus.Progress) {
+                    val progress = uiState.syncStatus as SyncRepository.SyncStatus.Progress
+                    Column(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .background(MaterialTheme.colorScheme.secondaryContainer.copy(alpha = 0.5f))
+                            .padding(horizontal = 24.dp, vertical = 8.dp)
+                    ) {
+                        Row(
+                            modifier = Modifier.fillMaxWidth(),
+                            horizontalArrangement = Arrangement.SpaceBetween,
+                            verticalAlignment = Alignment.CenterVertically
+                        ) {
+                            Text(
+                                text = progress.message,
+                                style = MaterialTheme.typography.bodySmall,
+                                maxLines = 1,
+                                overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                                modifier = Modifier.weight(1f)
+                            )
+                            Text(
+                                text = "${progress.current}/${progress.total}",
+                                style = MaterialTheme.typography.labelSmall,
+                                modifier = Modifier.padding(start = 8.dp)
+                            )
+                        }
+                        Spacer(modifier = Modifier.height(4.dp))
+                        LinearProgressIndicator(
+                            progress = { progress.current.toFloat() / progress.total.coerceAtLeast(1) },
+                            modifier = Modifier
+                                .fillMaxWidth()
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = MaterialTheme.colorScheme.secondary,
+                            trackColor = MaterialTheme.colorScheme.secondary.copy(alpha = 0.1f)
+                        )
+                    }
+                }
             }
         }
     ) { padding ->
@@ -323,6 +373,7 @@ fun LibraryScreen(
                     Spacer(modifier = Modifier.height(16.dp))
 
                     // Cover Image at the top - Show full image
+                    val isSyncing = currentReading.filePath.isEmpty()
                     AsyncImage(
                         model = currentReading.coverUrl,
                         contentDescription = null,
@@ -331,8 +382,9 @@ fun LibraryScreen(
                             .height(400.dp)
                             .clip(RoundedCornerShape(12.dp))
                             .background(MaterialTheme.colorScheme.surfaceVariant)
-                            .clickable { onBookClick(currentReading.id) },
-                        contentScale = ContentScale.Fit
+                            .clickable(enabled = !isSyncing) { onBookClick(currentReading.id) },
+                        contentScale = ContentScale.Fit,
+                        alpha = if (isSyncing) 0.5f else 1f
                     )
 
                     Spacer(modifier = Modifier.height(24.dp))
@@ -403,12 +455,16 @@ fun LibraryScreen(
                     ) {
                         Button(
                             onClick = { onBookClick(currentReading.id) },
+                            enabled = !isSyncing,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(56.dp),
                             shape = RoundedCornerShape(8.dp)
                         ) {
-                            Text("CONTINUE READING", style = MaterialTheme.typography.labelLarge)
+                            Text(
+                                if (isSyncing) "SYNCING..." else "CONTINUE READING", 
+                                style = MaterialTheme.typography.labelLarge
+                            )
                         }
 
                         OutlinedButton(
@@ -437,13 +493,26 @@ fun LibraryScreen(
 
                 Spacer(modifier = Modifier.height(32.dp))
 
-                // Chips
+                // Sort Options
+                Row(
+                    modifier = Modifier.fillMaxWidth(),
+                    verticalAlignment = Alignment.CenterVertically,
+                    horizontalArrangement = Arrangement.SpaceBetween
+                ) {
+                    Text(
+                        text = "SORT BY",
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                    )
+                }
+                Spacer(modifier = Modifier.height(12.dp))
+                
                 LazyRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                    items(listOf("All Books", "Philosophy", "Literature", "Science")) { tag ->
+                    items(LibrarySortOrder.entries) { sortOrder ->
                         FilterChip(
-                            selected = tag == "All Books",
-                            onClick = { /* TODO */ },
-                            label = { Text(tag) },
+                            selected = uiState.sortOrder == sortOrder,
+                            onClick = { viewModel.onSortOrderChange(sortOrder) },
+                            label = { Text(sortOrder.label) },
                             colors = FilterChipDefaults.filterChipColors(
                                 selectedContainerColor = MaterialTheme.colorScheme.primary,
                                 selectedLabelColor = Color.White
@@ -670,10 +739,13 @@ fun SearchTopBar(
 
 @Composable
 fun BookItem(book: Book, onClick: () -> Unit, onDeleteClick: () -> Unit) {
+    val isSyncing = book.filePath.isEmpty()
     Surface(
-        onClick = onClick,
-        color = MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
-        shape = RoundedCornerShape(12.dp)
+        onClick = { if (!isSyncing) onClick() },
+        color = if (isSyncing) MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.1f) 
+               else MaterialTheme.colorScheme.surfaceVariant.copy(alpha = 0.3f),
+        shape = RoundedCornerShape(12.dp),
+        enabled = !isSyncing
     ) {
         Row(
             modifier = Modifier
@@ -688,26 +760,43 @@ fun BookItem(book: Book, onClick: () -> Unit, onDeleteClick: () -> Unit) {
                     .size(60.dp, 80.dp)
                     .clip(RoundedCornerShape(4.dp))
                     .background(Color.Gray),
-                contentScale = ContentScale.Crop
+                contentScale = ContentScale.Crop,
+                alpha = if (isSyncing) 0.5f else 1f
             )
             Spacer(modifier = Modifier.width(16.dp))
             Column(modifier = Modifier.weight(1f)) {
-                Text(book.title, style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold))
-                Text(book.author, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f))
+                Text(
+                    book.title, 
+                    style = MaterialTheme.typography.titleMedium.copy(fontWeight = FontWeight.Bold),
+                    color = if (isSyncing) MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f) else Color.Unspecified
+                )
+                Text(
+                    book.author, 
+                    style = MaterialTheme.typography.bodySmall, 
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = if (isSyncing) 0.2f else 0.6f)
+                )
                 Spacer(modifier = Modifier.height(8.dp))
-                Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text("PROGRESS", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp))
-                    Spacer(modifier = Modifier.width(8.dp))
-                    LinearProgressIndicator(
-                        progress = { book.progress },
-                        modifier = Modifier
-                            .weight(1f)
-                            .height(4.dp)
-                            .clip(RoundedCornerShape(2.dp)),
-                        color = MaterialTheme.colorScheme.primary
+                if (isSyncing) {
+                    Text(
+                        "Syncing book file...", 
+                        style = MaterialTheme.typography.labelSmall,
+                        color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                     )
-                    Spacer(modifier = Modifier.width(8.dp))
-                    Text("${(book.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp))
+                } else {
+                    Row(verticalAlignment = Alignment.CenterVertically) {
+                        Text("PROGRESS", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp))
+                        Spacer(modifier = Modifier.width(8.dp))
+                        LinearProgressIndicator(
+                            progress = { book.progress },
+                            modifier = Modifier
+                                .weight(1f)
+                                .height(4.dp)
+                                .clip(RoundedCornerShape(2.dp)),
+                            color = MaterialTheme.colorScheme.primary
+                        )
+                        Spacer(modifier = Modifier.width(8.dp))
+                        Text("${(book.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp))
+                    }
                 }
             }
             IconButton(onClick = onDeleteClick) {

@@ -168,22 +168,21 @@ fun ReaderScreen(
         else -> Color.Black
     }
 
-    // Handle System Bar Colors and Visibility
+    // Handle system bar visibility and icon contrast. Android 15+ draws bars edge-to-edge.
     val activity = context as? Activity
     val window = activity?.window
     if (window != null) {
         val insetsController = WindowCompat.getInsetsController(window, window.decorView)
         
-        LaunchedEffect(uiState.isHudVisible, readerBackground) {
+        LaunchedEffect(uiState.isHudVisible, uiState.preferences.theme) {
+            val useDarkIcons = uiState.preferences.theme != Theme.DARK
+            insetsController.isAppearanceLightStatusBars = useDarkIcons
+            insetsController.isAppearanceLightNavigationBars = useDarkIcons
+
             if (uiState.isHudVisible) {
                 insetsController.show(WindowInsetsCompat.Type.statusBars())
-                window.statusBarColor = readerBackground.toArgb()
-                window.navigationBarColor = readerBackground.toArgb()
             } else {
                 insetsController.hide(WindowInsetsCompat.Type.statusBars())
-                // In immersive mode, make bars transparent or match background
-                window.statusBarColor = Color.Transparent.toArgb()
-                window.navigationBarColor = Color.Transparent.toArgb()
             }
         }
         

@@ -3,6 +3,7 @@ package org.marshsoft.bookreader.data.sync
 import android.content.Context
 import androidx.work.CoroutineWorker
 import androidx.work.WorkerParameters
+import kotlinx.coroutines.flow.collect
 import org.marshsoft.bookreader.BookReaderApplication
 
 class SyncWorker(
@@ -20,7 +21,7 @@ class SyncWorker(
         }
 
         return try {
-            syncRepository.syncAll()
+            syncRepository.syncAll().collect()
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()

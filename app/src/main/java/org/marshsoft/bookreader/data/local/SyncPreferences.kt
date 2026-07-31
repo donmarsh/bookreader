@@ -25,4 +25,8 @@ class SyncPreferences(context: Context) {
     var readerTheme: Int
         get() = prefs.getInt("reader_theme", 0) // 0: Light, 1: Dark, 2: Sepia
         set(value) = prefs.edit { putInt("reader_theme", value) }
+
+    var librarySortOrder: Int
+        get() = prefs.getInt("library_sort_order", 0) // 0: Title, 1: Author, 2: Recently Opened, 3: Recently Added
+        set(value) = prefs.edit { putInt("library_sort_order", value) }
 }

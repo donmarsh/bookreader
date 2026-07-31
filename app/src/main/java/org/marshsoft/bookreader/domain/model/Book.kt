@@ -14,5 +14,6 @@ data class Book(
     val publishedDate: String? = null,
     val language: String? = null,
     val identifier: String? = null,
-    val lastReadLocation: String? = null
+    val lastReadLocation: String? = null,
+    val lastReadTimestamp: Long = 0L
 )

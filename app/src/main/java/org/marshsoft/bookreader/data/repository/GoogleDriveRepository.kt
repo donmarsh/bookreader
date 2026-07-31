@@ -37,20 +37,19 @@ class GoogleDriveRepository {
             
             // First check if file already exists
             val existingFileId = findFileId(accessToken, identifier)
+            if (existingFileId != null) {
+                return@withContext existingFileId
+            }
             
             val metadata = File().apply {
                 name = "$identifier.$fileType"
                 appProperties = mapOf("book_identifier" to identifier)
-                parents = listOf("root")
             }
             
             val mediaContent = FileContent(if (fileType == "pdf") "application/pdf" else "application/epub+zip", localFile)
-            
-            val driveFile = if (existingFileId != null) {
-                service.files().update(existingFileId, metadata, mediaContent).execute()
-            } else {
-                service.files().create(metadata, mediaContent).execute()
-            }
+            val driveFile = service.files().create(metadata.apply {
+                parents = listOf("root")
+            }, mediaContent).execute()
             
             driveFile.id
         } catch (e: Exception) {

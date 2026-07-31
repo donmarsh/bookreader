@@ -286,7 +286,7 @@ fun LoginScreen(
             Spacer(modifier = Modifier.weight(1f))
 
             Text(
-                text = "© 2024 THE BOOK SANCTUARY. ESTABLISHED FOR THE MIND.",
+                text = "© 2026 THE BOOK SANCTUARY. ESTABLISHED FOR THE MIND.",
                 style = MaterialTheme.typography.labelSmall,
                 color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.4f),
                 textAlign = TextAlign.Center

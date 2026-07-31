@@ -26,12 +26,20 @@ data class LibraryUiState(
     val showFirstRunPrompt: Boolean = false,
     val syncStatus: SyncRepository.SyncStatus = SyncRepository.SyncStatus.Idle,
     val importProgress: ImportStatus = ImportStatus.Idle,
-    val bookToDelete: Book? = null
+    val bookToDelete: Book? = null,
+    val sortOrder: LibrarySortOrder = LibrarySortOrder.TITLE
 )
 
 sealed class ImportStatus {
     object Idle : ImportStatus()
     data class Loading(val current: Int, val total: Int, val message: String) : ImportStatus()
+}
+
+enum class LibrarySortOrder(val label: String) {
+    TITLE("Title"),
+    AUTHOR("Author"),
+    RECENTLY_OPENED("Recently Opened"),
+    RECENTLY_ADDED("Recently Added")
 }
 
 class LibraryViewModel(
@@ -46,24 +54,60 @@ class LibraryViewModel(
     private val _searchQuery = MutableStateFlow("")
     val searchQuery: StateFlow<String> = _searchQuery
 
-    val books: StateFlow<List<Book>> = combine(_books, _searchQuery) { books, query ->
-        if (query.isBlank()) {
-            books
-        } else {
-            books.filter { 
+    private val _uiState = MutableStateFlow(LibraryUiState(
+        sortOrder = LibrarySortOrder.entries[syncPreferences.librarySortOrder]
+    ))
+    val uiState: StateFlow<LibraryUiState> = _uiState
+
+    val books: StateFlow<List<Book>> = combine(_books, _searchQuery, _uiState) { books, query, state ->
+        if (query.isNotBlank()) {
+            val filtered = books.filter { 
                 it.title.contains(query, ignoreCase = true) || 
                 it.author.contains(query, ignoreCase = true)
             }
+            return@combine when (state.sortOrder) {
+                LibrarySortOrder.TITLE -> filtered.sortedBy { it.title.lowercase() }
+                LibrarySortOrder.AUTHOR -> filtered.sortedBy { it.author.lowercase() }
+                LibrarySortOrder.RECENTLY_OPENED -> filtered.sortedByDescending { it.lastReadTimestamp }
+                LibrarySortOrder.RECENTLY_ADDED -> filtered.sortedByDescending { it.id.toLongOrNull() ?: 0L }
+            }
         }
-    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
-    private val _uiState = MutableStateFlow(LibraryUiState())
-    val uiState: StateFlow<LibraryUiState> = _uiState
+        if (books.isEmpty()) return@combine emptyList<Book>()
+
+        // When not searching, keep the "Currently Reading" (most recently opened) at the top
+        // The _books list is already sorted by lastReadTimestamp DESC from the DAO
+        val current = books.first()
+        val others = books.drop(1)
+        
+        val sortedOthers = when (state.sortOrder) {
+            LibrarySortOrder.TITLE -> others.sortedBy { it.title.lowercase() }
+            LibrarySortOrder.AUTHOR -> others.sortedBy { it.author.lowercase() }
+            LibrarySortOrder.RECENTLY_OPENED -> others.sortedByDescending { it.lastReadTimestamp }
+            LibrarySortOrder.RECENTLY_ADDED -> others.sortedByDescending { it.id.toLongOrNull() ?: 0L }
+        }
+        
+        listOf(current) + sortedOthers
+    }.stateIn(viewModelScope, SharingStarted.WhileSubscribed(5000), emptyList())
 
     init {
         viewModelScope.launch {
             bookDao.getAllBooks().collectLatest { entities ->
                 _books.value = entities.map { it.toDomain() }
+            }
+        }
+
+        // Observe global sync status
+        viewModelScope.launch {
+            syncRepository.syncStatus.collect { status ->
+                _uiState.value = _uiState.value.copy(syncStatus = status)
+                
+                if (status is SyncRepository.SyncStatus.Success || status is SyncRepository.SyncStatus.Error) {
+                    if (syncPreferences.isFirstRun) {
+                        syncPreferences.isFirstRun = false
+                        _uiState.value = _uiState.value.copy(showFirstRunPrompt = false)
+                    }
+                }
             }
         }
 
@@ -95,19 +139,14 @@ class LibraryViewModel(
             syncPreferences.isSyncEnabled = true
             syncPreferences.isDriveSyncEnabled = true
             
-            syncRepository.syncAll(context).collect { status ->
-                _uiState.value = _uiState.value.copy(syncStatus = status)
-                
-                if (status is SyncRepository.SyncStatus.Success || status is SyncRepository.SyncStatus.Error) {
-                    syncPreferences.isFirstRun = false
-                    _uiState.value = _uiState.value.copy(showFirstRunPrompt = false)
-                }
+            syncRepository.syncAll(context).collect { 
+                // We observe status globally now, but we still need to trigger the flow
             }
         }
     }
 
     fun clearSyncStatus() {
-        _uiState.value = _uiState.value.copy(syncStatus = SyncRepository.SyncStatus.Idle)
+        syncRepository.clearSyncStatus()
     }
 
     fun importBook(context: android.content.Context, uri: Uri) {
@@ -278,7 +317,7 @@ class LibraryViewModel(
                 lastReadTimestamp = 0L // New imports go to the bottom
             )
             bookDao.insertBook(entity)
-            syncRepository.uploadBook(entity, context)
+            syncRepository.syncBook(entity, context)
             ImportResult.SUCCESS
         } catch (e: Exception) {
             e.printStackTrace()
@@ -329,6 +368,11 @@ class LibraryViewModel(
         _searchQuery.value = query
     }
 
+    fun onSortOrderChange(sortOrder: LibrarySortOrder) {
+        syncPreferences.librarySortOrder = sortOrder.ordinal
+        _uiState.value = _uiState.value.copy(sortOrder = sortOrder)
+    }
+
     private fun BookEntity.toDomain() = Book(
         id = id.toString(),
         title = title,
@@ -343,6 +387,7 @@ class LibraryViewModel(
         publisher = publisher,
         publishedDate = publishedDate,
         language = language,
-        identifier = identifier
+        identifier = identifier,
+        lastReadTimestamp = lastReadTimestamp
     )
 }
