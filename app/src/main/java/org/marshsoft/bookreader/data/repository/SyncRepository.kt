@@ -41,6 +41,11 @@ class SyncRepository(
     private val _syncStatus = MutableStateFlow<SyncStatus>(SyncStatus.Idle)
     val syncStatus: StateFlow<SyncStatus> = _syncStatus.asStateFlow()
 
+    // Lets UI distinguish a user-initiated sync (show progress on the main screen) from the
+    // hourly background SyncWorker run (progress only surfaced in Settings).
+    private val _isManualSync = MutableStateFlow(false)
+    val isManualSync: StateFlow<Boolean> = _isManualSync.asStateFlow()
+
     private var syncJob: kotlinx.coroutines.Job? = null
 
     private fun normalizedBookIdentifier(book: BookEntity): String {
@@ -79,7 +84,8 @@ class SyncRepository(
                         bookDao.updateBook(book.copy(
                             progress = progress,
                             lastReadLocation = location,
-                            lastReadTimestamp = remoteTimestamp
+                            lastReadTimestamp = remoteTimestamp,
+                            lastSyncedTimestamp = remoteTimestamp
                         ))
                     } else {
                         remoteDoc.set(mapOf(
@@ -87,11 +93,12 @@ class SyncRepository(
                             "author" to book.author,
                             "fileType" to book.fileType
                         ), SetOptions.merge()).await()
+                        bookDao.updateBook(book.copy(lastSyncedTimestamp = book.lastReadTimestamp))
                     }
                     return
                 }
             }
-            
+
             // Local is newer or remote doesn't exist, update remote
             remoteDoc.set(mapOf(
                 "identifier" to identifier,
@@ -102,22 +109,30 @@ class SyncRepository(
                 "lastReadLocation" to book.lastReadLocation,
                 "lastReadTimestamp" to book.lastReadTimestamp
             )).await()
+            bookDao.updateBook(book.copy(lastSyncedTimestamp = book.lastReadTimestamp))
         } catch (e: Exception) {
             e.printStackTrace()
         }
     }
 
     suspend fun syncBook(book: BookEntity, activityContext: Context? = null) {
-        if (syncPreferences.isSyncEnabled) {
-            syncProgress(book)
-        } else if (syncPreferences.isDriveSyncEnabled) {
-            syncBookMetadata(book, reconcileProgress = false)
+        // Skip the Firestore round-trip entirely when nothing has changed locally since the
+        // last successful push - remote-side updates from other devices are still picked up
+        // separately when performSyncAll pulls the remote book list.
+        val needsMetadataSync = book.lastSyncedTimestamp < 0 || book.lastReadTimestamp > book.lastSyncedTimestamp
+        if (needsMetadataSync) {
+            if (syncPreferences.isSyncEnabled) {
+                syncProgress(book)
+            } else if (syncPreferences.isDriveSyncEnabled) {
+                syncBookMetadata(book, reconcileProgress = false)
+            }
         }
         uploadBook(book, activityContext)
     }
 
     suspend fun uploadBook(book: BookEntity, activityContext: Context? = null) {
         if (!syncPreferences.isDriveSyncEnabled) return
+        if (book.isUploaded) return // Already on Drive - skip the redundant upload on every sync
         authRepository.currentUser.value ?: return
         val identifier = normalizedBookIdentifier(book)
         val file = java.io.File(book.filePath)
@@ -128,15 +143,42 @@ class SyncRepository(
         if (accessToken == null) {
             accessToken = authRepository.getAccessToken(context)
         }
-        
+
         if (accessToken != null) {
-            googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType)
+            val folderId = googleDriveRepository.getOrCreateAppFolder(accessToken)
+            val fileId = googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType, folderId)
+            if (fileId != null) {
+                bookDao.updateBook(book.copy(isUploaded = true))
+            }
         }
     }
 
-    fun syncAll(activityContext: Context? = null): Flow<SyncStatus> {
+    /**
+     * One-time cleanup: moves book files uploaded to Drive's root before the app's dedicated
+     * folder existed into that folder, so a user's Drive stays organized instead of everything
+     * landing loose in "My Drive".
+     */
+    private suspend fun organizeDriveFolderIfNeeded(activityContext: Context? = null) {
+        if (syncPreferences.isDriveFolderOrganized) return
+        if (!syncPreferences.isDriveSyncEnabled) return
+
+        var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
+        if (accessToken == null) {
+            accessToken = authRepository.getAccessToken(context)
+        }
+        if (accessToken == null) return
+
+        val folderId = googleDriveRepository.getOrCreateAppFolder(accessToken) ?: return
+        val movedCount = googleDriveRepository.moveAllFilesToFolder(accessToken, folderId)
+        if (movedCount != null) {
+            syncPreferences.isDriveFolderOrganized = true
+        }
+    }
+
+    fun syncAll(activityContext: Context? = null, isManual: Boolean = true): Flow<SyncStatus> {
         if (syncStatus.value is SyncStatus.Progress) return syncStatus
-        
+
+        _isManualSync.value = isManual
         syncJob?.cancel()
         syncJob = repositoryScope.launch {
             performSyncAll(activityContext)
@@ -161,6 +203,8 @@ class SyncRepository(
         try {
             _syncStatus.value = SyncStatus.Progress(0, 1, "Starting sync...")
 
+            organizeDriveFolderIfNeeded(activityContext)
+
             val localBooks = bookDao.getAllBooksOnce()
             
             // 1. Sync local metadata to Firestore first
@@ -168,6 +212,11 @@ class SyncRepository(
                 _syncStatus.value = SyncStatus.Progress(0, localBooks.size, "Syncing local library...")
                 for ((index, book) in localBooks.withIndex()) {
                     _syncStatus.value = SyncStatus.Progress(index + 1, localBooks.size, "Syncing ${book.title}...")
+                    // Re-check the book still exists locally: a large library sync can take a
+                    // while, and if the user deletes a book mid-sync, this stale snapshot would
+                    // otherwise re-upload its metadata to Firestore right after the delete,
+                    // resurrecting it there for the next sync/reinstall to pull back down.
+                    if (bookDao.getBookById(book.id) == null) continue
                     syncBook(book, activityContext)
                 }
             }
@@ -184,19 +233,41 @@ class SyncRepository(
             val totalSteps = sortedDocs.size
             
             _syncStatus.value = SyncStatus.Progress(0, totalSteps.coerceAtLeast(1), "Processing remote books...")
-            
+
+            // A book's identifier can change over time (e.g. blank at first upload, then a real
+            // EPUB identifier once re-parsed), which leaves behind duplicate Firestore documents
+            // for the same book - inflating the remote count and letting a deleted book resurface
+            // from whichever duplicate the delete didn't target. Track the first doc we keep per
+            // local book and delete any later doc that maps to the same one.
+            val keptDocIdByLocalBookId = mutableMapOf<Long, String>()
+
             for ((index, doc) in sortedDocs.withIndex()) {
                 val identifier = doc.getString("identifier") ?: doc.id
                 val title = doc.getString("title") ?: "Unknown Title"
                 val author = doc.getString("author") ?: "Unknown Author"
-                
+
                 _syncStatus.value = SyncStatus.Progress(index + 1, totalSteps, "Syncing $title...")
-                
+
                 var localBook = bookDao.getBookByIdentifier(identifier)
                 if (localBook == null) {
                     localBook = bookDao.getBookByTitleAndAuthor(title, author)
                 }
-                
+
+                val existingLocalBookId = localBook?.id
+                if (existingLocalBookId != null) {
+                    val keptDocId = keptDocIdByLocalBookId[existingLocalBookId]
+                    if (keptDocId != null && keptDocId != doc.id) {
+                        // Duplicate cloud record for a book we've already processed this sync - remove it.
+                        try {
+                            doc.reference.delete().await()
+                        } catch (e: Exception) {
+                            e.printStackTrace()
+                        }
+                        continue
+                    }
+                    keptDocIdByLocalBookId[existingLocalBookId] = doc.id
+                }
+
                 if (localBook == null) {
                     val newBook = BookEntity(
                         title = title,
@@ -210,6 +281,7 @@ class SyncRepository(
                     )
                     val id = bookDao.insertBook(newBook)
                     localBook = newBook.copy(id = id)
+                    keptDocIdByLocalBookId[id] = doc.id
                 } else {
                     val remoteTimestamp = doc.getLong("lastReadTimestamp") ?: 0L
                     if (remoteTimestamp > localBook.lastReadTimestamp) {
@@ -224,32 +296,9 @@ class SyncRepository(
                 }
                 
                 // 3. Prioritized Restore from Drive
-                val file = if (localBook.filePath.isNotEmpty()) java.io.File(localBook.filePath) else null
-                if ((file == null || !file.exists()) && syncPreferences.isDriveSyncEnabled) {
-                    // Try with activity context first if available, then fallback to app context
-                    var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
-                    if (accessToken == null) {
-                        accessToken = authRepository.getAccessToken(context)
-                    }
-
-                    if (accessToken != null) {
-                        val destinationFile = java.io.File(context.filesDir, "book_${System.currentTimeMillis()}_${identifier}.${localBook.fileType}")
-                        if (googleDriveRepository.downloadFile(accessToken, identifier, destinationFile)) {
-                            val publication = bookParser.parsePublication(destinationFile)
-                            val coverPath = publication?.let { pub ->
-                                bookParser.getCover(pub)?.let { bitmap ->
-                                    bookParser.saveBitmapToInternal(bitmap, "cover_${System.currentTimeMillis()}.png")
-                                }
-                            }
-                            bookDao.updateBook(localBook.copy(
-                                filePath = destinationFile.absolutePath,
-                                coverPath = coverPath ?: localBook.coverPath
-                            ))
-                        }
-                    }
-                }
+                restoreBookFileFromDrive(localBook, identifier, activityContext)
             }
-            
+
             _syncStatus.value = SyncStatus.Success
         } catch (e: Exception) {
             e.printStackTrace()
@@ -258,34 +307,120 @@ class SyncRepository(
         }
     }
 
+    /**
+     * Downloads [book]'s file from Drive and updates its local record if the file is missing.
+     * Returns true if the file was (re)downloaded.
+     */
+    private suspend fun restoreBookFileFromDrive(
+        book: BookEntity,
+        identifier: String,
+        activityContext: Context? = null
+    ): Boolean {
+        val file = if (book.filePath.isNotEmpty()) java.io.File(book.filePath) else null
+        if (file != null && file.exists()) return false
+        if (!syncPreferences.isDriveSyncEnabled) return false
+
+        // Try with activity context first if available, then fallback to app context
+        var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
+        if (accessToken == null) {
+            accessToken = authRepository.getAccessToken(context)
+        }
+        if (accessToken == null) return false
+
+        val destinationFile = java.io.File(context.filesDir, "book_${System.currentTimeMillis()}_${identifier}.${book.fileType}")
+        if (!googleDriveRepository.downloadFile(accessToken, identifier, destinationFile)) return false
+
+        val publication = bookParser.parsePublication(destinationFile)
+        val coverPath = publication?.let { pub ->
+            bookParser.getCover(pub)?.let { bitmap ->
+                bookParser.saveBitmapToInternal(bitmap, "cover_${System.currentTimeMillis()}.png")
+            }
+        }
+        bookDao.updateBook(book.copy(
+            filePath = destinationFile.absolutePath,
+            coverPath = coverPath ?: book.coverPath,
+            isUploaded = true // A successful download means the file already exists on Drive
+        ))
+        return true
+    }
+
+    /**
+     * Retries pulling a single book's file from Drive, for when it's stuck showing as
+     * "syncing" after a failed remote pull (e.g. a dropped connection during [syncAll]).
+     */
+    suspend fun pullBook(book: BookEntity, activityContext: Context? = null): Boolean {
+        if (authRepository.currentUser.value == null) return false
+        val identifier = normalizedBookIdentifier(book)
+        return try {
+            restoreBookFileFromDrive(book, identifier, activityContext)
+        } catch (e: Exception) {
+            e.printStackTrace()
+            false
+        }
+    }
+
     fun clearSyncStatus() {
         _syncStatus.value = SyncStatus.Idle
     }
 
-    suspend fun deleteRemoteBook(book: BookEntity, deleteFromDrive: Boolean, activityContext: Context? = null) {
-        val user = authRepository.currentUser.value ?: return
+    /**
+     * Deletes [book]'s cloud record(s) so it doesn't reappear on the next sync/reinstall.
+     * A book's identifier can drift over time (blank at first upload, then a real EPUB
+     * identifier once re-parsed), leaving duplicate Firestore documents for the same title+
+     * author under different identifiers/document IDs. Deleting only the single doc computed
+     * from the book's *current* identifier can miss those duplicates, letting the book resurface
+     * from one of them on the next sync - so this removes every matching doc (and every Drive
+     * file referenced by them), not just one.
+     * Returns false if any Firestore document deletion failed (e.g. network error) - callers
+     * should surface this rather than silently proceeding as if the book was fully forgotten.
+     */
+    suspend fun deleteRemoteBook(book: BookEntity, deleteFromDrive: Boolean, activityContext: Context? = null): Boolean {
+        val user = authRepository.currentUser.value ?: return false
         val identifier = normalizedBookIdentifier(book)
         val documentId = firestoreBookId(identifier)
+        val booksCollection = firestore.collection("users").document(user.id).collection("books")
 
-        // 1. Delete from Firestore
-        try {
-            firestore.collection("users").document(user.id)
-                .collection("books").document(documentId)
-                .delete().await()
+        val matchingDocs = try {
+            booksCollection
+                .whereEqualTo("title", book.title)
+                .whereEqualTo("author", book.author)
+                .get().await().documents
         } catch (e: Exception) {
             e.printStackTrace()
+            emptyList()
         }
 
-        // 2. Optionally delete from Google Drive
+        // Always include the doc derived from the book's current identifier, in case the
+        // title/author query missed it (e.g. stale/edited metadata).
+        val docIdsToDelete = (matchingDocs.map { it.id } + documentId).toSet()
+        val identifiersToDeleteFromDrive = (matchingDocs.mapNotNull { it.getString("identifier") } + identifier).toSet()
+
+        // 1. Delete every matching Firestore document
+        var firestoreDeleted = true
+        for (docId in docIdsToDelete) {
+            try {
+                booksCollection.document(docId).delete().await()
+            } catch (e: Exception) {
+                e.printStackTrace()
+                firestoreDeleted = false
+            }
+        }
+
+        // 2. Optionally delete from Google Drive - every identifier variant this book was ever
+        // uploaded under, so no duplicate Drive file is left behind either.
         if (deleteFromDrive) {
             try {
                 val accessToken = authRepository.getAccessToken(activityContext ?: context)
                 if (accessToken != null) {
-                    googleDriveRepository.deleteFile(accessToken, identifier)
+                    for (id in identifiersToDeleteFromDrive) {
+                        googleDriveRepository.deleteFile(accessToken, id)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()
             }
         }
+
+        return firestoreDeleted
     }
 }

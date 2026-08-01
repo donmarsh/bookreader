@@ -32,6 +32,7 @@ import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.Close
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Menu
+import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.Search
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -43,6 +44,7 @@ import androidx.compose.material3.FilterChipDefaults
 import androidx.compose.material3.FloatingActionButton
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
+import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
@@ -115,6 +117,7 @@ fun LibraryScreen(
     val snackbarHostState = remember { SnackbarHostState() }
 
     LaunchedEffect(uiState.syncStatus) {
+        if (!uiState.isManualSync) return@LaunchedEffect
         when (val status = uiState.syncStatus) {
             is SyncRepository.SyncStatus.Success -> {
                 snackbarHostState.showSnackbar("Library sync completed successfully")
@@ -315,8 +318,9 @@ fun LibraryScreen(
                     }
                 }
 
-                // Sync Progress Indicator
-                if (uiState.syncStatus is SyncRepository.SyncStatus.Progress) {
+                // Sync Progress Indicator - only for a user-initiated sync; the automatic
+                // background sync (SyncWorker) runs silently here, with progress in Settings.
+                if (uiState.isManualSync && uiState.syncStatus is SyncRepository.SyncStatus.Progress) {
                     val progress = uiState.syncStatus as SyncRepository.SyncStatus.Progress
                     Column(
                         modifier = Modifier
@@ -453,16 +457,27 @@ fun LibraryScreen(
                         modifier = Modifier.fillMaxWidth(),
                         horizontalArrangement = Arrangement.spacedBy(12.dp)
                     ) {
+                        val isPullingCurrent = currentReading.id in uiState.pullingBookIds
                         Button(
-                            onClick = { onBookClick(currentReading.id) },
-                            enabled = !isSyncing,
+                            onClick = {
+                                if (isSyncing) {
+                                    viewModel.retryPullBook(currentReading, context)
+                                } else {
+                                    onBookClick(currentReading.id)
+                                }
+                            },
+                            enabled = !isSyncing || !isPullingCurrent,
                             modifier = Modifier
                                 .weight(1f)
                                 .height(56.dp),
                             shape = RoundedCornerShape(8.dp)
                         ) {
                             Text(
-                                if (isSyncing) "SYNCING..." else "CONTINUE READING", 
+                                when {
+                                    !isSyncing -> "CONTINUE READING"
+                                    isPullingCurrent -> "SYNCING..."
+                                    else -> "RETRY SYNC"
+                                },
                                 style = MaterialTheme.typography.labelLarge
                             )
                         }
@@ -521,6 +536,14 @@ fun LibraryScreen(
                     }
                 }
 
+                Spacer(modifier = Modifier.height(12.dp))
+
+                Text(
+                    text = if (books.size == 1) "1 book" else "${books.size} books",
+                    style = MaterialTheme.typography.labelSmall,
+                    color = MaterialTheme.colorScheme.onSurface.copy(alpha = 0.6f)
+                )
+
                 Spacer(modifier = Modifier.height(24.dp))
             }
 
@@ -528,7 +551,9 @@ fun LibraryScreen(
                 BookItem(
                     book = book,
                     onClick = { onBookClick(book.id) },
-                    onDeleteClick = { viewModel.confirmDeleteBook(book) }
+                    onDeleteClick = { viewModel.confirmDeleteBook(book) },
+                    isPulling = book.id in uiState.pullingBookIds,
+                    onRetryClick = { viewModel.retryPullBook(book, context) }
                 )
                 Spacer(modifier = Modifier.height(16.dp))
             }
@@ -738,7 +763,13 @@ fun SearchTopBar(
 }
 
 @Composable
-fun BookItem(book: Book, onClick: () -> Unit, onDeleteClick: () -> Unit) {
+fun BookItem(
+    book: Book,
+    onClick: () -> Unit,
+    onDeleteClick: () -> Unit,
+    isPulling: Boolean = false,
+    onRetryClick: () -> Unit = {}
+) {
     val isSyncing = book.filePath.isEmpty()
     Surface(
         onClick = { if (!isSyncing) onClick() },
@@ -778,7 +809,7 @@ fun BookItem(book: Book, onClick: () -> Unit, onDeleteClick: () -> Unit) {
                 Spacer(modifier = Modifier.height(8.dp))
                 if (isSyncing) {
                     Text(
-                        "Syncing book file...", 
+                        if (isPulling) "Syncing book file..." else "Sync interrupted — tap retry",
                         style = MaterialTheme.typography.labelSmall,
                         color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
                     )
@@ -796,6 +827,23 @@ fun BookItem(book: Book, onClick: () -> Unit, onDeleteClick: () -> Unit) {
                         )
                         Spacer(modifier = Modifier.width(8.dp))
                         Text("${(book.progress * 100).toInt()}%", style = MaterialTheme.typography.labelSmall.copy(fontSize = 8.sp))
+                    }
+                }
+            }
+            if (isSyncing) {
+                IconButton(onClick = onRetryClick, enabled = !isPulling) {
+                    if (isPulling) {
+                        CircularProgressIndicator(
+                            modifier = Modifier.size(20.dp),
+                            strokeWidth = 2.dp,
+                            color = MaterialTheme.colorScheme.primary.copy(alpha = 0.6f)
+                        )
+                    } else {
+                        Icon(
+                            Icons.Default.Refresh,
+                            contentDescription = "Retry sync",
+                            tint = MaterialTheme.colorScheme.primary
+                        )
                     }
                 }
             }

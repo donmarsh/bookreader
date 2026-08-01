@@ -27,6 +27,14 @@ class SyncPreferences(context: Context) {
         set(value) = prefs.edit { putInt("reader_theme", value) }
 
     var librarySortOrder: Int
-        get() = prefs.getInt("library_sort_order", 0) // 0: Title, 1: Author, 2: Recently Opened, 3: Recently Added
+        get() = prefs.getInt("library_sort_order", 2) // 0: Title, 1: Author, 2: Recently Opened, 3: Recently Added
         set(value) = prefs.edit { putInt("library_sort_order", value) }
+
+    // One-time migration of book files uploaded to Drive's root before the app folder existed.
+    // Key is versioned ("_v2") because the first version of this migration used an invalid Drive
+    // query, silently found nothing, but still marked itself done - bumping the key makes it
+    // retry cleanly on devices that already ran (and were stuck on) the broken version.
+    var isDriveFolderOrganized: Boolean
+        get() = prefs.getBoolean("is_drive_folder_organized_v2", false)
+        set(value) = prefs.edit { putBoolean("is_drive_folder_organized_v2", value) }
 }

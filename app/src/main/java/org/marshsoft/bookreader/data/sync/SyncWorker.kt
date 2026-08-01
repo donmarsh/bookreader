@@ -21,7 +21,7 @@ class SyncWorker(
         }
 
         return try {
-            syncRepository.syncAll().collect()
+            syncRepository.syncAll(isManual = false).collect()
             Result.success()
         } catch (e: Exception) {
             e.printStackTrace()

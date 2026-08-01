@@ -19,5 +19,10 @@ data class BookEntity(
     val publishedDate: String? = null,
     val language: String? = null,
     val identifier: String? = null,
-    val lastReadLocation: String? = null
+    val lastReadLocation: String? = null,
+    val isUploaded: Boolean = false,
+    // lastReadTimestamp at the point this book's metadata was last pushed to Firestore.
+    // -1 means never synced. Lets a sync skip the Firestore round-trip entirely for books
+    // whose reading position hasn't changed since the last successful push.
+    val lastSyncedTimestamp: Long = -1L
 )

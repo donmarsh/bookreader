@@ -44,6 +44,9 @@ class BookReaderApplication : Application() {
             this,
             BookDatabase::class.java,
             "book_reader_db"
+        ).addMigrations(
+            org.marshsoft.bookreader.data.local.MIGRATION_1_2,
+            org.marshsoft.bookreader.data.local.MIGRATION_2_3
         ).build()
         bookParser = BookParser(this)
         authRepository = AuthRepository(this)

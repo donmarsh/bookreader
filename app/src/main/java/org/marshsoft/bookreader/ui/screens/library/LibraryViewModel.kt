@@ -27,7 +27,9 @@ data class LibraryUiState(
     val syncStatus: SyncRepository.SyncStatus = SyncRepository.SyncStatus.Idle,
     val importProgress: ImportStatus = ImportStatus.Idle,
     val bookToDelete: Book? = null,
-    val sortOrder: LibrarySortOrder = LibrarySortOrder.TITLE
+    val sortOrder: LibrarySortOrder = LibrarySortOrder.TITLE,
+    val pullingBookIds: Set<String> = emptySet(),
+    val isManualSync: Boolean = false
 )
 
 sealed class ImportStatus {
@@ -99,6 +101,11 @@ class LibraryViewModel(
 
         // Observe global sync status
         viewModelScope.launch {
+            syncRepository.isManualSync.collect { isManual ->
+                _uiState.value = _uiState.value.copy(isManualSync = isManual)
+            }
+        }
+        viewModelScope.launch {
             syncRepository.syncStatus.collect { status ->
                 _uiState.value = _uiState.value.copy(syncStatus = status)
                 
@@ -147,6 +154,27 @@ class LibraryViewModel(
 
     fun clearSyncStatus() {
         syncRepository.clearSyncStatus()
+    }
+
+    /** Retries pulling a single book's file from the cloud, for one stuck "syncing" in the list. */
+    fun retryPullBook(book: Book, context: android.content.Context? = null) {
+        val idLong = book.id.toLongOrNull() ?: return
+        if (book.id in _uiState.value.pullingBookIds) return
+
+        viewModelScope.launch {
+            _uiState.value = _uiState.value.copy(pullingBookIds = _uiState.value.pullingBookIds + book.id)
+            try {
+                val entity = bookDao.getBookById(idLong)
+                if (entity != null) {
+                    val pulled = syncRepository.pullBook(entity, context)
+                    if (!pulled) {
+                        _uiState.value = _uiState.value.copy(message = "Couldn't sync \"${book.title}\". Check your connection and try again.")
+                    }
+                }
+            } finally {
+                _uiState.value = _uiState.value.copy(pullingBookIds = _uiState.value.pullingBookIds - book.id)
+            }
+        }
     }
 
     fun importBook(context: android.content.Context, uri: Uri) {
@@ -338,11 +366,16 @@ class LibraryViewModel(
                     if (entity != null) {
                         // Delete from remote if requested
                         if (removeFromCloud) {
-                            syncRepository.deleteRemoteBook(entity, true, context)
+                            val removedFromCloud = syncRepository.deleteRemoteBook(entity, true, context)
+                            if (!removedFromCloud) {
+                                _uiState.value = _uiState.value.copy(
+                                    message = "Deleted \"${book.title}\" locally, but couldn't remove it from the cloud - it may come back on next sync. Try again once you have a connection."
+                                )
+                            }
                         }
-                        
+
                         bookDao.deleteBook(entity)
-                        
+
                         // Delete local files
                         File(entity.filePath).delete()
                         entity.coverPath?.let { File(it).delete() }
