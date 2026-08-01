@@ -477,8 +477,19 @@ fun ReadiumNavigator(
         update = { view ->
             view.setBackgroundColor(backgroundColor.toArgb())
             val fragmentManager = activity.supportFragmentManager
-            val currentFragment = fragmentManager.findFragmentById(containerId)
-            
+            var currentFragment = fragmentManager.findFragmentById(containerId)
+
+            // A restored placeholder (see MainActivity's FragmentFactory) stands in for a
+            // navigator fragment the system couldn't recreate after process death - discard it
+            // and rebuild the real navigator below.
+            if (currentFragment != null &&
+                currentFragment !is EpubNavigatorFragment &&
+                currentFragment !is PdfNavigatorFragment<*, *>
+            ) {
+                fragmentManager.commitNow { remove(currentFragment!!) }
+                currentFragment = null
+            }
+
             if (currentFragment == null) {
                 val initialLocator = initialLocatorJson?.let { Locator.fromJSON(org.json.JSONObject(it)) }
                     ?: publication.locatorFromLink(publication.readingOrder.first())?.copy(

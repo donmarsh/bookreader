@@ -44,6 +44,7 @@ class LibraryViewModelTest {
         Dispatchers.setMain(testDispatcher)
         every { syncPreferences.isFirstRun } returns false
         every { authRepository.currentUser } returns MutableStateFlow(null)
+        every { syncRepository.syncStatus } returns MutableStateFlow(SyncRepository.SyncStatus.Idle)
     }
 
     @After
