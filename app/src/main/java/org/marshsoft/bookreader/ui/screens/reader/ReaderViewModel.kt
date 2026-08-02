@@ -7,6 +7,7 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 import kotlinx.coroutines.launch
+import kotlinx.coroutines.withTimeoutOrNull
 import org.marshsoft.bookreader.data.local.dao.BookDao
 import org.marshsoft.bookreader.data.local.entities.BookEntity
 import org.marshsoft.bookreader.data.local.SyncPreferences
@@ -74,8 +75,13 @@ class ReaderViewModel(
                     // Update last read timestamp immediately when book is opened
                     val initialUpdatedEntity = entity.copy(lastReadTimestamp = System.currentTimeMillis())
                     bookDao.updateBook(initialUpdatedEntity)
-                    
-                    syncRepository.syncProgress(initialUpdatedEntity)
+
+                    // Reconciling progress against Firestore needs the network; without one this
+                    // can hang well past a reasonable wait, so cap it instead of blocking the
+                    // book from opening at all when offline.
+                    withTimeoutOrNull(5000) {
+                        syncRepository.syncProgress(initialUpdatedEntity)
+                    }
                     val updatedEntity = bookDao.getBookById(idLong) ?: initialUpdatedEntity
                     val book = updatedEntity.toDomain()
                     val publication = bookParser.parsePublication(File(book.filePath))
@@ -131,9 +137,13 @@ class ReaderViewModel(
                         lastReadTimestamp = System.currentTimeMillis()
                     )
                     bookDao.updateBook(updatedBook)
-                    syncRepository.syncProgress(updatedBook)
-                    
                     _uiState.value = _uiState.value.copy(book = updatedBook.toDomain())
+
+                    // Fire-and-forget: don't let a slow/absent network delay reflecting the new
+                    // progress locally, and don't let repeated page turns stack up blocked calls.
+                    withTimeoutOrNull(5000) {
+                        syncRepository.syncProgress(updatedBook)
+                    }
                 }
             } catch (e: Exception) {
                 e.printStackTrace()

@@ -1,5 +1,6 @@
 package org.marshsoft.bookreader.ui.screens.library
 
+import android.content.Context
 import android.net.Uri
 import android.text.Html
 import android.util.Log
@@ -29,7 +30,8 @@ data class LibraryUiState(
     val bookToDelete: Book? = null,
     val sortOrder: LibrarySortOrder = LibrarySortOrder.TITLE,
     val pullingBookIds: Set<String> = emptySet(),
-    val isManualSync: Boolean = false
+    val isManualSync: Boolean = false,
+    val showMobileDataSyncWarning: Boolean = false
 )
 
 sealed class ImportStatus {
@@ -140,13 +142,38 @@ class LibraryViewModel(
         _uiState.value = _uiState.value.copy(showFirstRunPrompt = false)
     }
 
-    fun syncLibrary(context: android.content.Context? = null) {
+    private var pendingManualSyncContext: Context? = null
+
+    fun syncLibrary(context: Context? = null) {
+        // Only explicit user-triggered calls pass a context (the automatic first-run continuation
+        // doesn't), so gating on that naturally limits this warning to manual syncs.
+        if (context != null && syncRepository.isOnMeteredConnection()) {
+            pendingManualSyncContext = context
+            _uiState.value = _uiState.value.copy(showMobileDataSyncWarning = true)
+            return
+        }
+        startSync(context)
+    }
+
+    fun confirmSyncOnMobileData() {
+        val context = pendingManualSyncContext
+        pendingManualSyncContext = null
+        _uiState.value = _uiState.value.copy(showMobileDataSyncWarning = false)
+        startSync(context)
+    }
+
+    fun cancelMobileDataSyncWarning() {
+        pendingManualSyncContext = null
+        _uiState.value = _uiState.value.copy(showMobileDataSyncWarning = false)
+    }
+
+    private fun startSync(context: Context?) {
         viewModelScope.launch {
             // Automatically enable sync settings when user confirms first-run sync
             syncPreferences.isSyncEnabled = true
             syncPreferences.isDriveSyncEnabled = true
-            
-            syncRepository.syncAll(context).collect { 
+
+            syncRepository.syncAll(context).collect {
                 // We observe status globally now, but we still need to trigger the flow
             }
         }

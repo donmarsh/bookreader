@@ -1,6 +1,8 @@
 package org.marshsoft.bookreader.data.repository
 
 import android.content.Context
+import android.net.ConnectivityManager
+import android.net.NetworkCapabilities
 import com.google.firebase.Firebase
 import com.google.firebase.firestore.FirebaseFirestore
 import com.google.firebase.firestore.SetOptions
@@ -47,6 +49,21 @@ class SyncRepository(
     val isManualSync: StateFlow<Boolean> = _isManualSync.asStateFlow()
 
     private var syncJob: kotlinx.coroutines.Job? = null
+
+    private fun isOnline(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return true
+        val network = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(network) ?: return false
+        return capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+    }
+
+    /** True when the active connection is metered (e.g. mobile data) rather than Wi-Fi/ethernet. */
+    fun isOnMeteredConnection(): Boolean {
+        val cm = context.getSystemService(Context.CONNECTIVITY_SERVICE) as? ConnectivityManager ?: return false
+        val network = cm.activeNetwork ?: return false
+        val capabilities = cm.getNetworkCapabilities(network) ?: return false
+        return !capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_NOT_METERED)
+    }
 
     private fun normalizedBookIdentifier(book: BookEntity): String {
         return book.identifier?.takeIf { it.isNotBlank() }
@@ -115,7 +132,8 @@ class SyncRepository(
         }
     }
 
-    suspend fun syncBook(book: BookEntity, activityContext: Context? = null) {
+    /** Returns false if a network operation this book actually needed was attempted and failed. */
+    suspend fun syncBook(book: BookEntity, activityContext: Context? = null): Boolean {
         // Skip the Firestore round-trip entirely when nothing has changed locally since the
         // last successful push - remote-side updates from other devices are still picked up
         // separately when performSyncAll pulls the remote book list.
@@ -127,30 +145,36 @@ class SyncRepository(
                 syncBookMetadata(book, reconcileProgress = false)
             }
         }
-        uploadBook(book, activityContext)
+        return uploadBook(book, activityContext)
     }
 
-    suspend fun uploadBook(book: BookEntity, activityContext: Context? = null) {
-        if (!syncPreferences.isDriveSyncEnabled) return
-        if (book.isUploaded) return // Already on Drive - skip the redundant upload on every sync
-        authRepository.currentUser.value ?: return
+    /**
+     * Returns true if there was nothing to upload, or the upload succeeded; false only when an
+     * upload was actually attempted and failed (e.g. connection dropped mid-sync) - callers use
+     * this to avoid reporting a sync as fully successful when it wasn't.
+     */
+    suspend fun uploadBook(book: BookEntity, activityContext: Context? = null): Boolean {
+        if (!syncPreferences.isDriveSyncEnabled) return true
+        if (book.isUploaded) return true // Already on Drive - skip the redundant upload on every sync
+        authRepository.currentUser.value ?: return true
         val identifier = normalizedBookIdentifier(book)
         val file = java.io.File(book.filePath)
-        if (!file.exists()) return
+        if (!file.exists()) return true
 
         // Try with activity context first if available, then fallback to app context
         var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
         if (accessToken == null) {
             accessToken = authRepository.getAccessToken(context)
         }
+        if (accessToken == null) return false // couldn't authenticate - likely offline
 
-        if (accessToken != null) {
-            val folderId = googleDriveRepository.getOrCreateAppFolder(accessToken)
-            val fileId = googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType, folderId)
-            if (fileId != null) {
-                bookDao.updateBook(book.copy(isUploaded = true))
-            }
+        val folderId = googleDriveRepository.getOrCreateAppFolder(accessToken)
+        val fileId = googleDriveRepository.uploadFile(accessToken, file, identifier, book.fileType, folderId)
+        if (fileId != null) {
+            bookDao.updateBook(book.copy(isUploaded = true))
+            return true
         }
+        return false
     }
 
     /**
@@ -199,39 +223,58 @@ class SyncRepository(
             _syncStatus.value = SyncStatus.Error(error)
             return
         }
-        
+
+        if (!isOnline()) {
+            _syncStatus.value = SyncStatus.Error("No internet connection - sync stopped")
+            return
+        }
+
         try {
             _syncStatus.value = SyncStatus.Progress(0, 1, "Starting sync...")
 
             organizeDriveFolderIfNeeded(activityContext)
 
+            // Tracks whether any per-book network operation that was actually attempted failed
+            // (e.g. connection dropped mid-sync) - used to avoid reporting "completed
+            // successfully" when part of the library silently didn't sync.
+            var hadFailures = false
+
             val localBooks = bookDao.getAllBooksOnce()
-            
+
             // 1. Sync local metadata to Firestore first
             if (localBooks.isNotEmpty()) {
                 _syncStatus.value = SyncStatus.Progress(0, localBooks.size, "Syncing local library...")
                 for ((index, book) in localBooks.withIndex()) {
+                    if (!isOnline()) {
+                        _syncStatus.value = SyncStatus.Error("Internet connection lost - sync stopped")
+                        return
+                    }
                     _syncStatus.value = SyncStatus.Progress(index + 1, localBooks.size, "Syncing ${book.title}...")
                     // Re-check the book still exists locally: a large library sync can take a
                     // while, and if the user deletes a book mid-sync, this stale snapshot would
                     // otherwise re-upload its metadata to Firestore right after the delete,
                     // resurrecting it there for the next sync/reinstall to pull back down.
                     if (bookDao.getBookById(book.id) == null) continue
-                    syncBook(book, activityContext)
+                    if (!syncBook(book, activityContext)) hadFailures = true
                 }
             }
 
+            if (!isOnline()) {
+                _syncStatus.value = SyncStatus.Error("Internet connection lost - sync stopped")
+                return
+            }
+
             _syncStatus.value = SyncStatus.Progress(0, 1, "Fetching remote library...")
-            
+
             // 2. Fetch all books from Firestore
             val remoteBooksQuery = firestore.collection("users").document(user.id)
                 .collection("books").get().await()
-            
+
             val remoteDocs = remoteBooksQuery.documents
             // Sort by lastReadTimestamp DESC to prioritize the most recently read book
             val sortedDocs = remoteDocs.sortedByDescending { it.getLong("lastReadTimestamp") ?: 0L }
             val totalSteps = sortedDocs.size
-            
+
             _syncStatus.value = SyncStatus.Progress(0, totalSteps.coerceAtLeast(1), "Processing remote books...")
 
             // A book's identifier can change over time (e.g. blank at first upload, then a real
@@ -242,6 +285,10 @@ class SyncRepository(
             val keptDocIdByLocalBookId = mutableMapOf<Long, String>()
 
             for ((index, doc) in sortedDocs.withIndex()) {
+                if (!isOnline()) {
+                    _syncStatus.value = SyncStatus.Error("Internet connection lost - sync stopped")
+                    return
+                }
                 val identifier = doc.getString("identifier") ?: doc.id
                 val title = doc.getString("title") ?: "Unknown Title"
                 val author = doc.getString("author") ?: "Unknown Author"
@@ -294,12 +341,18 @@ class SyncRepository(
                         ))
                     }
                 }
-                
+
                 // 3. Prioritized Restore from Drive
-                restoreBookFileFromDrive(localBook, identifier, activityContext)
+                if (restoreBookFileFromDrive(localBook, identifier, activityContext) == false) {
+                    hadFailures = true
+                }
             }
 
-            _syncStatus.value = SyncStatus.Success
+            _syncStatus.value = if (hadFailures) {
+                SyncStatus.Error("Sync finished, but some books couldn't be synced - check your connection and try again")
+            } else {
+                SyncStatus.Success
+            }
         } catch (e: Exception) {
             e.printStackTrace()
             val error = e.message ?: "Unknown error occurred during sync"
@@ -309,23 +362,25 @@ class SyncRepository(
 
     /**
      * Downloads [book]'s file from Drive and updates its local record if the file is missing.
-     * Returns true if the file was (re)downloaded.
+     * Returns null if nothing needed doing, true if the file was (re)downloaded, or false if a
+     * restore was actually needed and attempted but failed (e.g. connection dropped mid-sync) -
+     * callers use false to avoid reporting a sync as fully successful when it wasn't.
      */
     private suspend fun restoreBookFileFromDrive(
         book: BookEntity,
         identifier: String,
         activityContext: Context? = null
-    ): Boolean {
+    ): Boolean? {
         val file = if (book.filePath.isNotEmpty()) java.io.File(book.filePath) else null
-        if (file != null && file.exists()) return false
-        if (!syncPreferences.isDriveSyncEnabled) return false
+        if (file != null && file.exists()) return null
+        if (!syncPreferences.isDriveSyncEnabled) return null
 
         // Try with activity context first if available, then fallback to app context
         var accessToken = activityContext?.let { authRepository.getAccessToken(it) }
         if (accessToken == null) {
             accessToken = authRepository.getAccessToken(context)
         }
-        if (accessToken == null) return false
+        if (accessToken == null) return false // couldn't authenticate - likely offline
 
         val destinationFile = java.io.File(context.filesDir, "book_${System.currentTimeMillis()}_${identifier}.${book.fileType}")
         if (!googleDriveRepository.downloadFile(accessToken, identifier, destinationFile)) return false
@@ -352,7 +407,9 @@ class SyncRepository(
         if (authRepository.currentUser.value == null) return false
         val identifier = normalizedBookIdentifier(book)
         return try {
-            restoreBookFileFromDrive(book, identifier, activityContext)
+            // null (nothing needed doing) is not a failure here - the retry button that calls
+            // this only shows for books that are actually missing their file.
+            restoreBookFileFromDrive(book, identifier, activityContext) != false
         } catch (e: Exception) {
             e.printStackTrace()
             false

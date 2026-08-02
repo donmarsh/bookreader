@@ -193,6 +193,13 @@ fun LibraryScreen(
         )
     }
 
+    if (uiState.showMobileDataSyncWarning) {
+        MobileDataSyncWarningDialog(
+            onDismiss = { viewModel.cancelMobileDataSyncWarning() },
+            onConfirm = { viewModel.confirmSyncOnMobileData() }
+        )
+    }
+
     Scaffold(
         snackbarHost = { SnackbarHost(snackbarHostState) },
         floatingActionButton = {
@@ -563,6 +570,28 @@ fun LibraryScreen(
             }
         }
     }
+}
+
+@Composable
+fun MobileDataSyncWarningDialog(
+    onDismiss: () -> Unit,
+    onConfirm: () -> Unit
+) {
+    AlertDialog(
+        onDismissRequest = onDismiss,
+        title = { Text("Sync using mobile data?") },
+        text = { Text("You're not connected to Wi-Fi. Syncing your library can use a significant amount of mobile data if you have many books.") },
+        confirmButton = {
+            Button(onClick = onConfirm) {
+                Text("Sync Anyway")
+            }
+        },
+        dismissButton = {
+            TextButton(onClick = onDismiss) {
+                Text("Cancel")
+            }
+        }
+    )
 }
 
 @Composable

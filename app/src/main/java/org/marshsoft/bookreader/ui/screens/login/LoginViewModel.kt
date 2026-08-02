@@ -57,7 +57,7 @@ class LoginViewModel(
                 onSuccess()
             }.onFailure { e ->
                 if (e is GetCredentialCancellationException) {
-                    // User cancelled, do nothing
+                    // User canceled, do nothing
                 } else {
                     Log.e("LoginViewModel", "Credential Manager failed: ${e.message}", e)
                     onFallback()

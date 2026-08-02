@@ -36,8 +36,12 @@ class SettingsViewModel(
     private val syncRepository: SyncRepository
 ) : ViewModel() {
     val currentUser = authRepository.currentUser
-    
+
     private var pendingSyncEnable = false
+    private var pendingManualSyncContext: Context? = null
+
+    var showMobileDataSyncWarning by mutableStateOf(false)
+        private set
 
     private val _syncStatus = MutableStateFlow<SyncRepository.SyncStatus>(SyncRepository.SyncStatus.Idle)
     val syncStatus: StateFlow<SyncRepository.SyncStatus> = _syncStatus.asStateFlow()
@@ -118,8 +122,29 @@ class SettingsViewModel(
     }
 
     fun syncAll(context: Context? = null) {
+        if (context != null && syncRepository.isOnMeteredConnection()) {
+            pendingManualSyncContext = context
+            showMobileDataSyncWarning = true
+            return
+        }
+        startSync(context)
+    }
+
+    fun confirmSyncOnMobileData() {
+        val context = pendingManualSyncContext
+        pendingManualSyncContext = null
+        showMobileDataSyncWarning = false
+        startSync(context)
+    }
+
+    fun cancelMobileDataSyncWarning() {
+        pendingManualSyncContext = null
+        showMobileDataSyncWarning = false
+    }
+
+    private fun startSync(context: Context?) {
         viewModelScope.launch {
-            syncRepository.syncAll(context).collect { 
+            syncRepository.syncAll(context).collect {
                 // Observe via global flow
             }
         }
@@ -173,6 +198,13 @@ fun SettingsScreen(
         } else {
             viewModel.onDriveAuthResult(false)
         }
+    }
+
+    if (viewModel.showMobileDataSyncWarning) {
+        org.marshsoft.bookreader.ui.screens.library.MobileDataSyncWarningDialog(
+            onDismiss = { viewModel.cancelMobileDataSyncWarning() },
+            onConfirm = { viewModel.confirmSyncOnMobileData() }
+        )
     }
 
     Scaffold(
