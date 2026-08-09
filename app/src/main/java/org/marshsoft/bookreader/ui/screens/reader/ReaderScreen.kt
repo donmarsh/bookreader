@@ -3,9 +3,9 @@ package org.marshsoft.bookreader.ui.screens.reader
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
-import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -49,16 +49,15 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
-import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.zIndex
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.toArgb
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
+import androidx.compose.ui.zIndex
 import androidx.core.view.WindowCompat
 import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
@@ -470,7 +469,7 @@ fun ReadiumNavigator(
     // underlying WebView render process itself can be the thing stuck, which surviving fragment
     // removal doesn't necessarily clear. Recreating the whole Activity does: it forces the exact
     // same code path a fresh book-open already goes through correctly.
-    val lifecycleOwner = LocalLifecycleOwner.current
+    val lifecycleOwner = androidx.lifecycle.compose.LocalLifecycleOwner.current
     DisposableEffect(lifecycleOwner) {
         // The very first ON_RESUME fires as part of normal activity startup, before anything has
         // even rendered - reacting to that (rather than only a genuine return from background)
@@ -528,7 +527,7 @@ fun ReadiumNavigator(
                 currentFragment !is EpubNavigatorFragment &&
                 currentFragment !is PdfNavigatorFragment<*, *>
             ) {
-                fragmentManager.commitNow { remove(currentFragment!!) }
+                fragmentManager.commitNow { remove(currentFragment) }
                 currentFragment = null
             }
 
@@ -581,7 +580,7 @@ fun ReadiumNavigator(
                 
                 navigator = nav
             } else {
-                if (navigator == null && currentFragment is org.readium.r2.navigator.VisualNavigator) {
+                if (navigator == null) {
                     addInputListeners(currentFragment)
                     navigator = currentFragment
                 }
