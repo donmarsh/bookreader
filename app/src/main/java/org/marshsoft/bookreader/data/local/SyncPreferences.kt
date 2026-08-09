@@ -23,7 +23,9 @@ class SyncPreferences(context: Context) {
         set(value) = prefs.edit { putFloat("reader_font_size", value) }
 
     var readerTheme: Int
-        get() = prefs.getInt("reader_theme", 0) // 0: Light, 1: Dark, 2: Sepia
+        // -1: not yet chosen by the user, falls back to the system dark/light setting.
+        // 0: Light, 1: Dark, 2: Sepia
+        get() = prefs.getInt("reader_theme", -1)
         set(value) = prefs.edit { putInt("reader_theme", value) }
 
     var librarySortOrder: Int

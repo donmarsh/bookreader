@@ -21,6 +21,7 @@ import org.readium.r2.navigator.preferences.Theme
 import org.marshsoft.bookreader.util.BookParser
 import org.readium.r2.shared.ExperimentalReadiumApi
 import java.io.File
+import kotlin.time.Duration.Companion.milliseconds
 
 data class ReaderUiState @OptIn(ExperimentalReadiumApi::class) constructor(
     val book: Book? = null,
@@ -38,7 +39,8 @@ class ReaderViewModel(
     private val bookDao: BookDao,
     private val bookParser: BookParser,
     private val syncRepository: SyncRepository,
-    private val syncPreferences: SyncPreferences
+    private val syncPreferences: SyncPreferences,
+    systemDarkTheme: Boolean
 ) : ViewModel() {
 
     @OptIn(ExperimentalReadiumApi::class)
@@ -50,7 +52,9 @@ class ReaderViewModel(
                 theme = when (syncPreferences.readerTheme) {
                     1 -> Theme.DARK
                     2 -> Theme.SEPIA
-                    else -> Theme.LIGHT
+                    0 -> Theme.LIGHT
+                    // User hasn't picked a theme yet: match the system setting.
+                    else -> if (systemDarkTheme) Theme.DARK else Theme.LIGHT
                 }
             )
         )
@@ -79,7 +83,7 @@ class ReaderViewModel(
                     // Reconciling progress against Firestore needs the network; without one this
                     // can hang well past a reasonable wait, so cap it instead of blocking the
                     // book from opening at all when offline.
-                    withTimeoutOrNull(5000) {
+                    withTimeoutOrNull(3000.milliseconds) {
                         syncRepository.syncProgress(initialUpdatedEntity)
                     }
                     val updatedEntity = bookDao.getBookById(idLong) ?: initialUpdatedEntity
@@ -141,7 +145,7 @@ class ReaderViewModel(
 
                     // Fire-and-forget: don't let a slow/absent network delay reflecting the new
                     // progress locally, and don't let repeated page turns stack up blocked calls.
-                    withTimeoutOrNull(5000) {
+                    withTimeoutOrNull(3000.milliseconds) {
                         syncRepository.syncProgress(updatedBook)
                     }
                 }

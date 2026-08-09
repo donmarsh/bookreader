@@ -3,6 +3,7 @@ package org.marshsoft.bookreader.ui.screens.reader
 import android.app.Activity
 import androidx.activity.compose.BackHandler
 import androidx.compose.animation.AnimatedVisibility
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.animation.slideInVertically
 import androidx.compose.animation.slideOutVertically
 import androidx.compose.foundation.layout.Arrangement
@@ -15,6 +16,7 @@ import androidx.compose.foundation.layout.displayCutout
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.height
+import androidx.compose.foundation.layout.navigationBarsPadding
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.statusBars
 import androidx.compose.foundation.layout.width
@@ -47,6 +49,7 @@ import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.setValue
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.zIndex
@@ -61,6 +64,8 @@ import androidx.core.view.WindowInsetsCompat
 import androidx.fragment.app.FragmentActivity
 import androidx.fragment.app.FragmentContainerView
 import androidx.fragment.app.commitNow
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
 import androidx.lifecycle.ViewModel
 import androidx.lifecycle.ViewModelProvider
 import androidx.lifecycle.viewmodel.compose.viewModel
@@ -91,12 +96,13 @@ fun ReaderScreen(
     BackHandler(onBack = onBackClick)
     val context = LocalContext.current
     val app = context.applicationContext as BookReaderApplication
+    val systemDarkTheme = isSystemInDarkTheme()
     val viewModel: ReaderViewModel = viewModel(
         key = bookId,
         factory = object : ViewModelProvider.Factory {
             override fun <T : ViewModel> create(modelClass: Class<T>): T {
                 @Suppress("UNCHECKED_CAST")
-                return ReaderViewModel(bookId, app.database.bookDao(), app.bookParser, app.syncRepository, app.syncPreferences) as T
+                return ReaderViewModel(bookId, app.database.bookDao(), app.bookParser, app.syncRepository, app.syncPreferences, systemDarkTheme) as T
             }
         }
     )
@@ -219,6 +225,7 @@ fun ReaderScreen(
                     .fillMaxSize()
                     .padding(top = safeTopPadding)
                     .padding(horizontal = 12.dp)
+                    .padding(bottom = 2.dp) // Extra clearance above the persistent bottom progress bar
             ) {
                 if (publication != null) {
                     ReadiumNavigator(
@@ -298,13 +305,16 @@ fun ReaderScreen(
                 }
             }
 
-            // Persistent bottom progress bar
+            // Persistent bottom progress bar - lifted clear of the navigation bar/gesture area
+            // and the screen's curved bottom edge, which otherwise clip a bar sitting flush at y=0.
             LinearProgressIndicator(
                 progress = { book.progress },
                 modifier = Modifier
                     .fillMaxWidth()
-                    .height(2.dp)
-                    .align(Alignment.BottomCenter),
+                    .align(Alignment.BottomCenter)
+                    .navigationBarsPadding()
+                    .padding(bottom = 8.dp)
+                    .height(2.dp),
                 color = MaterialTheme.colorScheme.primary,
                 trackColor = Color.Transparent
             )
@@ -451,6 +461,38 @@ fun ReadiumNavigator(
                 }
             })
         }
+    }
+
+    // After the app is backgrounded for a while (e.g. screen lock), the reader's WebView-based
+    // content - and sometimes the whole window, including the plain Compose HUD - can come back
+    // as a stale, unrepainted frame rather than a crash. This isn't fixed by re-submitting
+    // preferences, nor by just tearing down and rebuilding the navigator fragment - the
+    // underlying WebView render process itself can be the thing stuck, which surviving fragment
+    // removal doesn't necessarily clear. Recreating the whole Activity does: it forces the exact
+    // same code path a fresh book-open already goes through correctly.
+    val lifecycleOwner = LocalLifecycleOwner.current
+    DisposableEffect(lifecycleOwner) {
+        // The very first ON_RESUME fires as part of normal activity startup, before anything has
+        // even rendered - reacting to that (rather than only a genuine return from background)
+        // is what previously caused the book to open blank/unresponsive. Only treat it as a real
+        // background return if the pause lasted a bit (a screen lock takes at least a couple of
+        // seconds), so brief focus loss (e.g. a system dialog) doesn't trigger a disruptive recreate.
+        var pausedAtMillis: Long? = null
+        val observer = LifecycleEventObserver { _, event ->
+            when (event) {
+                Lifecycle.Event.ON_PAUSE -> pausedAtMillis = System.currentTimeMillis()
+                Lifecycle.Event.ON_RESUME -> {
+                    val pausedAt = pausedAtMillis
+                    pausedAtMillis = null
+                    if (pausedAt != null && System.currentTimeMillis() - pausedAt > 2000) {
+                        activity.recreate()
+                    }
+                }
+                else -> {}
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
     }
 
     LaunchedEffect(navigator) {
